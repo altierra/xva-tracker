@@ -27,6 +27,7 @@ let tray: Tray | null = null;
 let isTracking = false;
 let currentEntryId: string | null = null;
 let idleAlerted = false;
+let isQuitting = false;
 
 // ── Single instance lock ───────────────────────────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
@@ -74,7 +75,7 @@ function createWindow() {
 
   // Minimize to tray instead of closing
   mainWindow.on("close", (e) => {
-    if (!app.isQuitting) {
+    if (!isQuitting) {
       e.preventDefault();
       mainWindow!.hide();
     }
@@ -120,7 +121,7 @@ export function updateTrayMenu() {
     {
       label: "Quit",
       click: () => {
-        app.isQuitting = true;
+        isQuitting = true;
         app.quit();
       },
     },
@@ -249,7 +250,7 @@ autoUpdater.on("update-downloaded", () => {
     })
     .then(({ response }) => {
       if (response === 0) {
-        app.isQuitting = true;
+        isQuitting = true;
         autoUpdater.quitAndInstall();
       }
     });
@@ -273,13 +274,6 @@ app.on("activate", () => {
   if (mainWindow === null) createWindow();
   else { mainWindow.show(); mainWindow.focus(); }
 });
-
-// Extend app type for isQuitting flag
-declare module "electron" {
-  interface App {
-    isQuitting: boolean;
-  }
-}
 
 export interface ProjectConfig {
   screenshotEnabled: boolean;

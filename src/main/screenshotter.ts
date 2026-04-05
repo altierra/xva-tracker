@@ -15,7 +15,7 @@ async function takeScreenshot() {
 
     if (!sources.length) return;
     const screenshot = sources[0].thumbnail;
-    const imageBase64 = screenshot.toDataURL("image/jpeg", 0.75); // JPEG at 75% quality
+    const imageBase64 = "data:image/jpeg;base64," + screenshot.toJPEG(75).toString("base64");
 
     await fetch(`${_portalUrl}/api/timetracker/agent/screenshot`, {
       method: "POST",
