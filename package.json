@@ -65,7 +65,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "altierraxva",
+      "owner": "altierra",
       "repo": "xva-tracker"
     }
   }
