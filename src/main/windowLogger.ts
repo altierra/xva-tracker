@@ -73,3 +73,26 @@ export function stopWindowLogger() {
 export function getWindowLog(): WindowEntry[] {
   return [...windowLog];
 }
+
+export interface AppUsage {
+  app: string;
+  durationSecs: number;
+}
+
+export function getActivitySummary(): AppUsage[] {
+  const entries: WindowEntry[] = [...windowLog];
+  // Include current in-progress window
+  if (currentWindow) {
+    entries.push({ ...currentWindow, endedAt: new Date().toISOString() });
+  }
+
+  const map = new Map<string, number>();
+  for (const entry of entries) {
+    const dur = (new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime()) / 1000;
+    if (dur > 0) map.set(entry.app, (map.get(entry.app) ?? 0) + dur);
+  }
+
+  return Array.from(map.entries())
+    .map(([app, durationSecs]) => ({ app, durationSecs: Math.round(durationSecs) }))
+    .sort((a, b) => b.durationSecs - a.durationSecs);
+}

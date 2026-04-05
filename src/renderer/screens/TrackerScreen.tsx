@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type { AgentConfig, Project } from "../types";
+import type { AgentConfig, Project, AppUsage } from "../types";
 
 interface Props {
   config: AgentConfig;
@@ -15,6 +15,14 @@ function formatElapsed(seconds: number) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+function formatDuration(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
 function getActivityColor(score: number): string {
@@ -42,7 +50,22 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const [showSettings, setShowSettings] = useState(false);
   const [portalUrl, setPortalUrl] = useState("https://altierraxva.com");
   const [newPortalUrl, setNewPortalUrl] = useState("");
+  const [activityLog, setActivityLog] = useState<AppUsage[]>([]);
+  const [showActivity, setShowActivity] = useState(false);
+
+  // Timer refs
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Idle pause tracking
+  const pauseOffsetRef = useRef<number>(0);   // total paused ms accumulated so far
+  const pauseStartRef = useRef<number | null>(null); // when current pause started (ms epoch)
+
+  // Helper: accumulate current pause into offset and clear pauseStart
+  const accumulatePause = useCallback(() => {
+    if (pauseStartRef.current !== null) {
+      pauseOffsetRef.current += Date.now() - pauseStartRef.current;
+      pauseStartRef.current = null;
+    }
+  }, []);
 
   // Restore tracking state if there's a running entry
   useEffect(() => {
@@ -58,11 +81,13 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     });
   }, [config]);
 
-  // Elapsed timer tick
+  // Elapsed timer tick — accounts for pause time
   useEffect(() => {
     if (isTracking && startTime) {
       timerRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startTime.getTime()) / 1000));
+        const currentPauseMs = pauseStartRef.current !== null ? Date.now() - pauseStartRef.current : 0;
+        const net = Math.max(0, Date.now() - startTime.getTime() - pauseOffsetRef.current - currentPauseMs);
+        setElapsed(Math.floor(net / 1000));
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -76,21 +101,51 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     const unsubIdle = window.xvaApi.onIdleDetected(({ idleSecs: s }) => {
       setIsIdle(true);
       setIdleSecs(s);
+      // Only start a new pause if not already paused
+      if (pauseStartRef.current === null) {
+        // Back-date pause start by how long user has already been idle
+        pauseStartRef.current = Date.now() - s * 1000;
+      }
     });
+
     const unsubStatus = window.xvaApi.onIdleStatus(({ idleSecs: s, isIdle: idle }) => {
       setIdleSecs(s);
-      if (!idle) setIsIdle(false);
-      // Rough activity score based on idle time
+      if (!idle) {
+        // User came back — auto-resume without clicking button
+        accumulatePause();
+        setIsIdle(false);
+      }
+      // Rough activity score based on net active time
       if (isTracking && elapsed > 0) {
-        const activeFrac = Math.max(0, elapsed - s) / elapsed;
+        const currentPauseMs = pauseStartRef.current !== null ? Date.now() - pauseStartRef.current : 0;
+        const totalPausedSecs = Math.floor((pauseOffsetRef.current + currentPauseMs) / 1000);
+        const activeSecs = Math.max(0, elapsed - totalPausedSecs);
+        const activeFrac = activeSecs / Math.max(1, elapsed);
         setActivityScore(Math.round(activeFrac * 100));
       }
     });
+
     const unsubResumed = window.xvaApi.onIdleResumed(() => {
+      accumulatePause();
       setIsIdle(false);
     });
+
     return () => { unsubIdle(); unsubStatus(); unsubResumed(); };
-  }, [isTracking, elapsed]);
+  }, [isTracking, elapsed, accumulatePause]);
+
+  // Poll activity log every 30s when tracking
+  useEffect(() => {
+    if (!isTracking) {
+      setActivityLog([]);
+      return;
+    }
+    const fetchLog = () => {
+      window.xvaApi.getActivityLog().then(log => setActivityLog(log)).catch(() => {});
+    };
+    fetchLog();
+    const iv = setInterval(fetchLog, 30_000);
+    return () => clearInterval(iv);
+  }, [isTracking]);
 
   const selectedProject = config.projects.find(p => p.id === selectedProjectId) ?? null;
 
@@ -102,34 +157,22 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     setLoading(true);
     setError("");
 
-    const token = await window.xvaApi.getToken();
-    const url = portalUrl;
-
     try {
       const now = new Date();
       const weekStart = getWeekStart(now);
 
-      const res = await fetch(`${url}/api/timetracker/entries`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          description: description.trim(),
-          projectId: selectedProjectId || null,
-          startTime: now.toISOString(),
-          weekStart: weekStart.toISOString(),
-          isRunning: true,
-        }),
+      // Reset pause tracking
+      pauseOffsetRef.current = 0;
+      pauseStartRef.current = null;
+
+      const data = await window.xvaApi.createEntry({
+        description: description.trim(),
+        projectId: selectedProjectId || null,
+        startTime: now.toISOString(),
+        weekStart: weekStart.toISOString(),
+        isRunning: true,
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
       const entry = data.entry ?? data;
       const entryId = entry.id as string;
 
@@ -143,7 +186,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         screenshotIntervalMins: projectConfig.screenshotIntervalMins,
       });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to start timer.");
+      setError(e instanceof Error ? `${e.constructor.name}: ${e.message}` : String(e));
     }
 
     setLoading(false);
@@ -154,37 +197,30 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     setLoading(true);
     setError("");
 
-    const token = await window.xvaApi.getToken();
-    const url = portalUrl;
-
     try {
+      // Finalize any active pause so elapsed is correct before stopping
+      accumulatePause();
+
       await window.xvaApi.stopTracking();
 
-      const res = await fetch(`${url}/api/timetracker/entries/${currentEntryId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          isRunning: false,
-          endTime: new Date().toISOString(),
-          duration: elapsed,
-          activityScore: activityScore ?? 0,
-        }),
+      await window.xvaApi.patchEntry(currentEntryId, {
+        isRunning: false,
+        endTime: new Date().toISOString(),
+        duration: elapsed,
+        activityScore: activityScore ?? 0,
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
 
       setIsTracking(false);
       setCurrentEntryId(null);
       setStartTime(null);
       setIsIdle(false);
       setActivityScore(null);
+      setActivityLog([]);
+      setShowActivity(false);
       setDescription("");
+      // Reset pause refs
+      pauseOffsetRef.current = 0;
+      pauseStartRef.current = null;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to stop timer.");
     }
@@ -194,6 +230,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
 
   const resumeFromIdle = async () => {
     await window.xvaApi.resumeFromIdle();
+    accumulatePause();
     setIsIdle(false);
   };
 
@@ -283,7 +320,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       {/* Idle banner */}
       {isIdle && (
         <div style={styles.idleBanner}>
-          <span>⏸ Idle detected ({Math.round(idleSecs / 60)} min)</span>
+          <span>⏸ Timer paused — idle {Math.round(idleSecs / 60)} min</span>
           <button onClick={resumeFromIdle} style={styles.resumeBtn}>
             I'm back
           </button>
@@ -299,6 +336,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
           }}>
             {formatElapsed(elapsed)}
           </div>
+          {isIdle && (
+            <span style={{ fontSize: 11, color: "#f59e0b", letterSpacing: "0.08em" }}>PAUSED</span>
+          )}
 
           {isTracking && activityScore !== null && (
             <div style={styles.activityRow}>
@@ -385,6 +425,31 @@ export function TrackerScreen({ config, onRefresh }: Props) {
             ? "⏹  Stop Timer"
             : "▶  Start Timer"}
         </button>
+
+        {/* Activity log — only shown when tracking */}
+        {isTracking && activityLog.length > 0 && (
+          <div style={styles.activitySection}>
+            <button
+              onClick={() => setShowActivity(v => !v)}
+              style={styles.activityToggle}
+            >
+              <span>📊 Session Activity</span>
+              <span style={{ opacity: 0.5 }}>{showActivity ? "▲" : "▼"}</span>
+            </button>
+
+            {showActivity && (
+              <div style={styles.activityList}>
+                {activityLog.map(item => (
+                  <div key={item.app} style={styles.activityItem}>
+                    <div style={styles.activityAppDot} />
+                    <span style={styles.activityAppName}>{item.app}</span>
+                    <span style={styles.activityDur}>{formatDuration(item.durationSecs)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -575,6 +640,58 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     transition: "background 0.2s, opacity 0.15s",
     marginTop: 4,
+  },
+  activitySection: {
+    background: "#0d1117",
+    border: "1px solid #1e2a3a",
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  activityToggle: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 12px",
+    background: "none",
+    border: "none",
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
+    cursor: "pointer",
+  },
+  activityList: {
+    borderTop: "1px solid #1e2a3a",
+    padding: "8px 0 4px",
+  },
+  activityItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "5px 12px",
+  },
+  activityAppDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#1855F5",
+    flexShrink: 0,
+  },
+  activityAppName: {
+    flex: 1,
+    fontSize: 12,
+    color: "#94a3b8",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  activityDur: {
+    fontSize: 11,
+    color: "#475569",
+    fontVariantNumeric: "tabular-nums",
+    flexShrink: 0,
   },
   settingsSection: {
     borderTop: "1px solid #1e2a3a",

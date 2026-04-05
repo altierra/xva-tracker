@@ -23,6 +23,11 @@ export interface AgentConfig {
   runningEntry: RunningEntry | null;
 }
 
+export interface AppUsage {
+  app: string;
+  durationSecs: number;
+}
+
 export interface XvaApi {
   getToken: () => Promise<string>;
   setToken: (token: string) => Promise<void>;
@@ -34,6 +39,9 @@ export interface XvaApi {
   stopTracking: () => Promise<{ ok: boolean }>;
   resumeFromIdle: () => Promise<void>;
   getTrackingState: () => Promise<{ isTracking: boolean; currentEntryId: string | null; idleThresholdMins: number }>;
+  createEntry: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  patchEntry: (id: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  getActivityLog: () => Promise<AppUsage[]>;
   checkUpdates: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   onIdleDetected: (cb: (payload: { idleSecs: number }) => void) => () => void;

@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld("xvaApi", {
   resumeFromIdle: () => ipcRenderer.invoke("resume-from-idle"),
   getTrackingState: () => ipcRenderer.invoke("get-tracking-state"),
 
+  // Timer API (proxied through main process to avoid CORS)
+  createEntry: (body: Record<string, unknown>) => ipcRenderer.invoke("create-entry", body),
+  patchEntry: (id: string, body: Record<string, unknown>) => ipcRenderer.invoke("patch-entry", id, body),
+
+  // Activity log
+  getActivityLog: () => ipcRenderer.invoke("get-activity-log"),
+
   // Updates
   checkUpdates: () => ipcRenderer.invoke("check-updates"),
 

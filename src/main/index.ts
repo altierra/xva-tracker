@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, she
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
-import { startWindowLogger, stopWindowLogger } from "./windowLogger";
+import { startWindowLogger, stopWindowLogger, getActivitySummary } from "./windowLogger";
 import { startScreenshotter, stopScreenshotter } from "./screenshotter";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 
@@ -63,12 +63,10 @@ function createWindow() {
   });
 
   // Load renderer
-  if (process.env.NODE_ENV === "development") {
-    mainWindow.loadURL("http://localhost:5173");
+  if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
-  } else {
-    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
+  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
 
   mainWindow.once("ready-to-show", () => {
     mainWindow!.show();
@@ -88,7 +86,7 @@ function createTray() {
   // Use template image on macOS for dark/light mode support
   const iconPath = path.join(__dirname, "../../assets/tray-icon.png");
   const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  tray = new Tray(icon.isEmpty() ? nativeImage.createFromDataURL("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4jWNgYGD4z8BQDwAAAP//AwBY3QFTAAAAASUVORK5CYII=") : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("XVA Tracker");
   updateTrayMenu();
 
@@ -231,6 +229,38 @@ ipcMain.handle("fetch-config", async () => {
   }
 });
 
+// Timer entry API — proxied through main to avoid renderer CORS
+ipcMain.handle("create-entry", async (_e, body: Record<string, unknown>) => {
+  const token = store.get("token") as string;
+  const portalUrl = store.get("portalUrl") as string;
+  console.log("[create-entry] portalUrl:", portalUrl, "token:", token?.slice(0, 8));
+  const res = await fetch(`${portalUrl}/api/timetracker/entries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json() as Record<string, unknown>;
+  if (!res.ok) throw new Error((data.error as string) || `HTTP ${res.status}`);
+  return data;
+});
+
+ipcMain.handle("patch-entry", async (_e, id: string, body: Record<string, unknown>) => {
+  const token = store.get("token") as string;
+  const portalUrl = store.get("portalUrl") as string;
+  console.log("[patch-entry] id:", id, "portalUrl:", portalUrl, "token:", token?.slice(0, 8));
+  const res = await fetch(`${portalUrl}/api/timetracker/entries/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json() as Record<string, unknown>;
+  if (!res.ok) throw new Error((data.error as string) || `HTTP ${res.status}`);
+  return data;
+});
+
+// Activity log
+ipcMain.handle("get-activity-log", () => getActivitySummary());
+
 // Open external links
 ipcMain.handle("open-external", (_e, url: string) => shell.openExternal(url));
 
@@ -259,8 +289,10 @@ autoUpdater.on("update-downloaded", () => {
 
 // ── App lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  console.log("[main] app ready, creating window and tray");
   createWindow();
   createTray();
+  console.log("[main] IPC handlers registered");
 
   if (process.env.NODE_ENV !== "development") {
     autoUpdater.checkForUpdatesAndNotify();
