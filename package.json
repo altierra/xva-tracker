@@ -1,0 +1,72 @@
+{
+  "name": "xva-tracker",
+  "version": "1.0.0",
+  "description": "XVA Tracker — Desktop time tracking agent for Altierra VAs",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run build:main:watch\" \"npm run build:renderer:watch\" \"npm run electron:dev\"",
+    "electron:dev": "wait-on dist/main/index.js dist/renderer/index.html && electron .",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:main:watch": "tsc -p tsconfig.main.json --watch",
+    "build:renderer": "vite build --config vite.config.ts",
+    "build:renderer:watch": "vite build --config vite.config.ts --watch",
+    "build": "npm run build:main && npm run build:renderer",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:all": "npm run build && electron-builder --mac --win"
+  },
+  "dependencies": {
+    "active-win": "^8.1.0",
+    "axios": "^1.6.0",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.3",
+    "electron-builder": "^24.9.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.altierraxva.xvatracker",
+    "productName": "XVA Tracker",
+    "copyright": "Copyright © 2025 Altierra",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*"
+    ],
+    "artifactName": "XVA-Tracker-${os}.${ext}",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "XVA-Tracker-Setup.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "altierraxva",
+      "repo": "xva-tracker"
+    }
+  }
+}
