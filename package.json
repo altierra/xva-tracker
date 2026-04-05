@@ -44,12 +44,15 @@
       "dist/**/*",
       "assets/**/*"
     ],
-    "artifactName": "XVA-Tracker-${os}.${ext}",
+    "asarUnpack": [
+      "**/node_modules/active-win/**"
+    ],
+    "artifactName": "XVA-Tracker-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "assets/icon.icns",
       "target": [
-        { "target": "dmg", "arch": ["universal"] }
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "dmg", "arch": ["x64"] }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -57,11 +60,10 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "icon": "assets/icon.ico",
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ],
-      "artifactName": "XVA-Tracker-Setup.${ext}"
+      "artifactName": "XVA-Tracker-Setup-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",
