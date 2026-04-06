@@ -195,7 +195,12 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         screenshotIntervalMins: pc.screenshotIntervalMins,
       });
     } catch (e: unknown) {
-      setError(e instanceof Error ? `${e.constructor.name}: ${e.message}` : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.toLowerCase().includes("limit reached")) {
+        setError(msg); // already human-readable from server
+      } else {
+        setError(`${e instanceof Error ? e.constructor.name : "Error"}: ${msg}`);
+      }
     }
     setLoading(false);
   };
