@@ -72,12 +72,10 @@ function createWindow() {
     mainWindow!.show();
   });
 
-  // Minimize to tray instead of closing
-  mainWindow.on("close", (e) => {
-    if (!isQuitting) {
-      e.preventDefault();
-      mainWindow!.hide();
-    }
+  // Red X quits the app
+  mainWindow.on("close", () => {
+    isQuitting = true;
+    app.quit();
   });
 }
 
