@@ -109,12 +109,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     });
 
     const unsubStatus = window.xvaApi.onIdleStatus(({ idleSecs: s, isIdle: idle }) => {
-      setIdleSecs(s);
-      if (!idle) {
-        // User came back — auto-resume without clicking button
-        accumulatePause();
-        setIsIdle(false);
-      }
+      // Only update displayed idle seconds while still idle (keeps banner accurate)
+      if (idle) setIdleSecs(s);
+      // Do NOT auto-resume on mouse movement — user must click "I'm back"
       // Rough activity score based on net active time
       if (isTracking && elapsed > 0) {
         const currentPauseMs = pauseStartRef.current !== null ? Date.now() - pauseStartRef.current : 0;
@@ -125,10 +122,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       }
     });
 
-    const unsubResumed = window.xvaApi.onIdleResumed(() => {
-      accumulatePause();
-      setIsIdle(false);
-    });
+    // onIdleResumed fires from main when idle clears — we ignore it here
+    // because resume is ONLY triggered by the user clicking "I'm back"
+    const unsubResumed = window.xvaApi.onIdleResumed(() => {});
 
     return () => { unsubIdle(); unsubStatus(); unsubResumed(); };
   }, [isTracking, elapsed, accumulatePause]);
