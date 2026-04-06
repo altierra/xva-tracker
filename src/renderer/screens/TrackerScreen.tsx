@@ -195,12 +195,10 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         screenshotIntervalMins: pc.screenshotIntervalMins,
       });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.toLowerCase().includes("limit reached")) {
-        setError(msg); // already human-readable from server
-      } else {
-        setError(`${e instanceof Error ? e.constructor.name : "Error"}: ${msg}`);
-      }
+      const raw = e instanceof Error ? e.message : String(e);
+      // Strip Electron IPC wrapper: "Error invoking remote method 'X': Error: actual message"
+      const msg = raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+      setError(msg);
     }
     setLoading(false);
   };
