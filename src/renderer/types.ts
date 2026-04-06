@@ -42,6 +42,7 @@ export interface XvaApi {
   createEntry: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   patchEntry: (id: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   getActivityLog: () => Promise<AppUsage[]>;
+  platform: string;
   checkUpdates: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   onIdleDetected: (cb: (payload: { idleSecs: number }) => void) => () => void;

@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld("xvaApi", {
   // Activity log
   getActivityLog: () => ipcRenderer.invoke("get-activity-log"),
 
+  // Platform info
+  platform: process.platform,
+
   // Updates
   checkUpdates: () => ipcRenderer.invoke("check-updates"),
 
