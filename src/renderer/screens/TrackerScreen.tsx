@@ -61,6 +61,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const pauseOffsetRef = useRef<number>(0);           // total accumulated pause ms
   const idlePauseStartRef = useRef<number | null>(null);   // epoch ms when idle pause began
   const manualPauseStartRef = useRef<number | null>(null); // epoch ms when manual pause began
+  // Mirror elapsed in a ref so idle useEffect doesn't re-run every second
+  const elapsedRef = useRef<number>(0);
 
   // Total paused ms right now (both sources combined)
   const totalPausedMs = useCallback(() => {
@@ -104,23 +106,28 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     if (isTracking && startTime) {
       timerRef.current = setInterval(() => {
         const net = Math.max(0, Date.now() - startTime.getTime() - totalPausedMs());
-        setElapsed(Math.floor(net / 1000));
+        const secs = Math.floor(net / 1000);
+        elapsedRef.current = secs;
+        setElapsed(secs);
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (!isTracking) setElapsed(0);
+      if (!isTracking) { elapsedRef.current = 0; setElapsed(0); }
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isTracking, startTime, totalPausedMs]);
 
   // ─── Idle detection from main process ────────────────────────────────────
+  // NOTE: elapsed is intentionally NOT in deps — use elapsedRef.current instead.
+  // Having elapsed here would tear down/re-add the IPC listener every second,
+  // which can cause the one-shot "idle-detected" event to be silently dropped.
   useEffect(() => {
     const unsubIdle = window.xvaApi.onIdleDetected(({ idleSecs: s }) => {
       setIsIdle(true);
       setIdleSecs(s);
       // Only start idle pause if not already idle-paused
       if (idlePauseStartRef.current === null) {
-        // Back-date to when idle actually started
+        // Back-date pause start to when idle actually began
         idlePauseStartRef.current = Date.now() - s * 1000;
       }
     });
@@ -130,10 +137,11 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       if (idle) setIdleSecs(s);
       // Do NOT auto-resume — user must click "I'm back"
 
-      // Activity score
-      if (isTracking && elapsed > 0) {
+      // Activity score — read elapsed from ref to avoid stale closure
+      const cur = elapsedRef.current;
+      if (isTracking && cur > 0) {
         const pausedSecs = Math.floor(totalPausedMs() / 1000);
-        const activeFrac = Math.max(0, elapsed - pausedSecs) / Math.max(1, elapsed);
+        const activeFrac = Math.max(0, cur - pausedSecs) / Math.max(1, cur);
         setActivityScore(Math.round(activeFrac * 100));
       }
     });
@@ -142,7 +150,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     const unsubResumed = window.xvaApi.onIdleResumed(() => {});
 
     return () => { unsubIdle(); unsubStatus(); unsubResumed(); };
-  }, [isTracking, elapsed, totalPausedMs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTracking, totalPausedMs]);
 
   // ─── Activity log refresh ─────────────────────────────────────────────────
   useEffect(() => {
