@@ -1,4 +1,5 @@
 import activeWin from "active-win";
+import { systemPreferences } from "electron";
 
 interface WindowEntry {
   app: string;
@@ -17,6 +18,12 @@ let _portalUrl: string = "";
 
 async function pollWindow() {
   try {
+    // On macOS: check accessibility permission WITHOUT prompting (false = no prompt).
+    // If not granted, skip silently — calling activeWin() without permission is what
+    // triggers the OS popup every time.
+    if (process.platform === "darwin" && !systemPreferences.isTrustedAccessibilityClient(false)) {
+      return;
+    }
     const win = await activeWin();
     const app = win?.owner?.name ?? "Unknown";
     const title = win?.title ?? "";
