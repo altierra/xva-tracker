@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("xvaApi", {
   platform: process.platform,
 
   // Updates
-  checkUpdates: () => ipcRenderer.invoke("check-updates"),
+  installUpdate: () => ipcRenderer.invoke("install-update"),
 
   // External links
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
@@ -53,9 +53,9 @@ contextBridge.exposeInMainWorld("xvaApi", {
     ipcRenderer.on("auth-changed", cb);
     return () => ipcRenderer.removeAllListeners("auth-changed");
   },
-  onUpdateAvailable: (cb: () => void) => {
-    ipcRenderer.on("update-available", cb);
-    return () => ipcRenderer.removeAllListeners("update-available");
+  onUpdateReady: (cb: () => void) => {
+    ipcRenderer.on("update-ready", cb);
+    return () => ipcRenderer.removeAllListeners("update-ready");
   },
 });
 

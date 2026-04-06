@@ -30,7 +30,7 @@ export default function App() {
     loadConfig();
 
     const unsubAuth = window.xvaApi.onAuthChanged(loadConfig);
-    const unsubUpdate = window.xvaApi.onUpdateAvailable(() => setUpdateAvailable(true));
+    const unsubUpdate = window.xvaApi.onUpdateReady(() => setUpdateAvailable(true));
 
     return () => {
       unsubAuth();
@@ -54,7 +54,8 @@ export default function App() {
     <>
       {updateAvailable && (
         <div style={styles.updateBanner}>
-          A new version is available — <button style={styles.updateBtn} onClick={() => window.xvaApi.checkUpdates()}>Restart & Update</button>
+          <span style={{ marginRight: 8 }}>🎉 A new version of XVA Tracker is ready to install.</span>
+          <button style={styles.updateBtn} onClick={() => window.xvaApi.installUpdate()}>Restart & Update Now</button>
         </div>
       )}
       <TrackerScreen config={config!} onRefresh={loadConfig} />
@@ -79,18 +80,25 @@ const styles: Record<string, React.CSSProperties> = {
     animation: "spin 0.8s linear infinite",
   },
   updateBanner: {
-    background: "#1e3a5f",
-    color: "#93c5fd",
+    background: "#1855F5",
+    color: "#ffffff",
     fontSize: 12,
-    padding: "6px 16px",
+    fontWeight: 600,
+    padding: "8px 16px",
     textAlign: "center",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   updateBtn: {
-    background: "none",
+    background: "#ffffff",
     border: "none",
-    color: "#60a5fa",
-    textDecoration: "underline",
+    color: "#1855F5",
+    fontWeight: 700,
+    fontSize: 11,
+    padding: "3px 10px",
+    borderRadius: 6,
     cursor: "pointer",
-    fontSize: 12,
   },
 };

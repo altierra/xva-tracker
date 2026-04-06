@@ -52,13 +52,13 @@ export interface XvaApi {
   getActivityLog: () => Promise<AppUsage[]>;
   getWindowLog: () => Promise<WindowLogEntry[]>;
   platform: string;
-  checkUpdates: () => Promise<void>;
+  installUpdate: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   onIdleDetected: (cb: (payload: { idleSecs: number }) => void) => () => void;
   onIdleStatus: (cb: (payload: { idleSecs: number; isIdle: boolean }) => void) => () => void;
   onIdleResumed: (cb: () => void) => () => void;
   onAuthChanged: (cb: () => void) => () => void;
-  onUpdateAvailable: (cb: () => void) => () => void;
+  onUpdateReady: (cb: () => void) => () => void;
 }
 
 declare global {

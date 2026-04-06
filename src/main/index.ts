@@ -264,27 +264,16 @@ ipcMain.handle("get-window-log", () => getWindowLog());
 // Open external links
 ipcMain.handle("open-external", (_e, url: string) => shell.openExternal(url));
 
-// Check for updates
-ipcMain.handle("check-updates", () => autoUpdater.checkForUpdatesAndNotify());
+// Install the already-downloaded update and restart
+ipcMain.handle("install-update", () => {
+  isQuitting = true;
+  autoUpdater.quitAndInstall();
+});
 
 // ── Auto-updater ───────────────────────────────────────────────────────────────
-autoUpdater.on("update-available", () => {
-  mainWindow?.webContents.send("update-available");
-});
 autoUpdater.on("update-downloaded", () => {
-  dialog
-    .showMessageBox({
-      type: "info",
-      title: "Update Ready",
-      message: "A new version of XVA Tracker is ready. Restart to apply the update.",
-      buttons: ["Restart Now", "Later"],
-    })
-    .then(({ response }) => {
-      if (response === 0) {
-        isQuitting = true;
-        autoUpdater.quitAndInstall();
-      }
-    });
+  // Notify renderer — banner appears so VA can choose when to restart
+  mainWindow?.webContents.send("update-ready");
 });
 
 // ── App lifecycle ──────────────────────────────────────────────────────────────
@@ -296,6 +285,8 @@ app.whenReady().then(() => {
 
   if (process.env.NODE_ENV !== "development") {
     autoUpdater.checkForUpdatesAndNotify();
+    // Re-check every hour in case the app is left open all day
+    setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 60 * 60 * 1000);
   }
 });
 
