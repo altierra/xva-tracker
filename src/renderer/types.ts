@@ -28,6 +28,14 @@ export interface AppUsage {
   durationSecs: number;
 }
 
+export interface WindowLogEntry {
+  app: string;
+  title: string;
+  url: string | null;
+  startedAt: string;
+  endedAt: string;
+}
+
 export interface XvaApi {
   getToken: () => Promise<string>;
   setToken: (token: string) => Promise<void>;
@@ -42,6 +50,7 @@ export interface XvaApi {
   createEntry: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   patchEntry: (id: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   getActivityLog: () => Promise<AppUsage[]>;
+  getWindowLog: () => Promise<WindowLogEntry[]>;
   platform: string;
   checkUpdates: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;

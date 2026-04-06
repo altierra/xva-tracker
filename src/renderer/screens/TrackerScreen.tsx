@@ -226,12 +226,18 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       // Finalize both pauses so elapsed is accurate
       flushIdlePause();
       flushManualPause();
+
+      // Fetch full window log before stopping (clears on next startTracking)
+      let windowLog: unknown[] = [];
+      try { windowLog = await window.xvaApi.getWindowLog(); } catch { /* no-op */ }
+
       await window.xvaApi.stopTracking();
       await window.xvaApi.patchEntry(currentEntryId, {
         isRunning: false,
         endTime: new Date().toISOString(),
         duration: elapsed,
         activityScore: activityScore ?? 0,
+        windowLog: windowLog.length > 0 ? windowLog : undefined,
       });
       setIsTracking(false);
       setCurrentEntryId(null);

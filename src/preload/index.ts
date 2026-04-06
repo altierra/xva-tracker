@@ -22,8 +22,10 @@ contextBridge.exposeInMainWorld("xvaApi", {
   createEntry: (body: Record<string, unknown>) => ipcRenderer.invoke("create-entry", body),
   patchEntry: (id: string, body: Record<string, unknown>) => ipcRenderer.invoke("patch-entry", id, body),
 
-  // Activity log
+  // Activity log (summary for in-app panel)
   getActivityLog: () => ipcRenderer.invoke("get-activity-log"),
+  // Full window log (sent to portal when timer stops)
+  getWindowLog: () => ipcRenderer.invoke("get-window-log"),
 
   // Platform info
   platform: process.platform,

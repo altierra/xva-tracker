@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, she
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
-import { startWindowLogger, stopWindowLogger, getActivitySummary } from "./windowLogger";
+import { startWindowLogger, stopWindowLogger, getActivitySummary, getWindowLog } from "./windowLogger";
 import { startScreenshotter, stopScreenshotter } from "./screenshotter";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 
@@ -258,8 +258,10 @@ ipcMain.handle("patch-entry", async (_e, id: string, body: Record<string, unknow
   return data;
 });
 
-// Activity log
+// Activity log (summary for in-app display)
 ipcMain.handle("get-activity-log", () => getActivitySummary());
+// Full window log (detailed, sent to portal on stop)
+ipcMain.handle("get-window-log", () => getWindowLog());
 
 // Open external links
 ipcMain.handle("open-external", (_e, url: string) => shell.openExternal(url));
