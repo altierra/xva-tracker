@@ -120,6 +120,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     });
   }, [config]);
 
+  // Derived pause state — must be declared before the timer useEffect uses it
+  const isPaused = isIdle || isManuallyPaused || isSuspicious;
+
   // ─── Timer tick (net of all pauses) ──────────────────────────────────────
   // Stop the interval completely when paused — don't rely on offset math to
   // freeze the display, which can drift. Restart on resume so the first tick
@@ -221,7 +224,6 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   };
 
   const selectedProject = config.projects.find(p => p.id === selectedProjectId) ?? null;
-  const isPaused = isIdle || isManuallyPaused || isSuspicious;
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   const startTimer = async () => {
