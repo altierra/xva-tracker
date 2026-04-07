@@ -48,16 +48,16 @@
       "**/node_modules/active-win/**"
     ],
     "artifactName": "XVA-Tracker-${os}-${arch}.${ext}",
+    "afterPack": "./scripts/after-pack.js",
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
         { "target": "dmg", "arch": ["x64"] }
       ],
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "win": {
       "target": [
