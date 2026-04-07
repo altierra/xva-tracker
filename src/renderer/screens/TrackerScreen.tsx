@@ -121,8 +121,11 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   }, [config]);
 
   // ─── Timer tick (net of all pauses) ──────────────────────────────────────
+  // Stop the interval completely when paused — don't rely on offset math to
+  // freeze the display, which can drift. Restart on resume so the first tick
+  // immediately shows the correct net value via totalPausedMs().
   useEffect(() => {
-    if (isTracking && startTime) {
+    if (isTracking && startTime && !isPaused) {
       timerRef.current = setInterval(() => {
         const net = Math.max(0, Date.now() - startTime.getTime() - totalPausedMs());
         const secs = Math.floor(net / 1000);
@@ -130,11 +133,11 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         setElapsed(secs);
       }, 1000);
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       if (!isTracking) { elapsedRef.current = 0; setElapsed(0); }
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isTracking, startTime, totalPausedMs]);
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  }, [isTracking, startTime, totalPausedMs, isPaused]);
 
   // ─── Idle detection from main process ────────────────────────────────────
   // NOTE: elapsed is intentionally NOT in deps — use elapsedRef.current instead.
