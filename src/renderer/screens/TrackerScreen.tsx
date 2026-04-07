@@ -63,6 +63,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const manualPauseStartRef = useRef<number | null>(null); // epoch ms when manual pause began
   // Mirror elapsed in a ref so idle useEffect doesn't re-run every second
   const elapsedRef = useRef<number>(0);
+  // Collect idle periods to send to portal on stop
+  const idlePeriodsRef = useRef<{ start: string; end: string; durationSecs: number }[]>([]);
 
   // Total paused ms right now (both sources combined)
   const totalPausedMs = useCallback(() => {
@@ -71,10 +73,17 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     return pauseOffsetRef.current + idleMs + manMs;
   }, []);
 
-  // Flush idle pause into offset
+  // Flush idle pause into offset and record the period
   const flushIdlePause = useCallback(() => {
     if (idlePauseStartRef.current !== null) {
-      pauseOffsetRef.current += Date.now() - idlePauseStartRef.current;
+      const startMs = idlePauseStartRef.current;
+      const endMs = Date.now();
+      pauseOffsetRef.current += endMs - startMs;
+      idlePeriodsRef.current.push({
+        start: new Date(startMs).toISOString(),
+        end: new Date(endMs).toISOString(),
+        durationSecs: Math.round((endMs - startMs) / 1000),
+      });
       idlePauseStartRef.current = null;
     }
   }, []);
@@ -176,6 +185,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       pauseOffsetRef.current = 0;
       idlePauseStartRef.current = null;
       manualPauseStartRef.current = null;
+      idlePeriodsRef.current = [];
 
       const data = await window.xvaApi.createEntry({
         description: description.trim(),
@@ -241,6 +251,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         duration: elapsed,
         activityScore: activityScore ?? 0,
         windowLog: windowLog.length > 0 ? windowLog : undefined,
+        idlePeriods: idlePeriodsRef.current.length > 0 ? idlePeriodsRef.current : undefined,
       });
       setIsTracking(false);
       setCurrentEntryId(null);
