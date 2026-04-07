@@ -54,11 +54,13 @@ export interface XvaApi {
   platform: string;
   installUpdate: () => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  resumeFromSuspicious: () => Promise<void>;
   onIdleDetected: (cb: (payload: { idleSecs: number }) => void) => () => void;
   onIdleStatus: (cb: (payload: { idleSecs: number; isIdle: boolean }) => void) => () => void;
   onIdleResumed: (cb: () => void) => () => void;
   onAuthChanged: (cb: () => void) => () => void;
   onUpdateReady: (cb: () => void) => () => void;
+  onSuspiciousActivity: (cb: () => void) => () => void;
 }
 
 declare global {

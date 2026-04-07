@@ -50,11 +50,21 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const [activityScore, setActivityScore] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // ─── Suspicious-activity (jiggler) state ────────────────────────────────
+  const [isSuspicious, setIsSuspicious] = useState(false);
+  const [verifyWord, setVerifyWord] = useState("");
+  const [verifyInput, setVerifyInput] = useState("");
+  const [verifyError, setVerifyError] = useState(false);
+  const suspiciousPeriodsRef = useRef<{ detectedAt: string; verifiedAt: string | null; verified: boolean }[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [portalUrl, setPortalUrl] = useState("https://altierraxva.com");
   const [newPortalUrl, setNewPortalUrl] = useState("");
   const [activityLog, setActivityLog] = useState<AppUsage[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+
+  // Rotating word list for jiggler verification
+  const VERIFY_WORDS = ["apple", "mango", "table", "cloud", "river", "tiger", "piano", "storm", "grain", "forge"];
 
   // ─── Pause tracking refs ─────────────────────────────────────────────────
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -171,8 +181,44 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     return () => clearInterval(iv);
   }, [isTracking]);
 
+  // ─── Suspicious-activity listener ────────────────────────────────────────
+  useEffect(() => {
+    const unsub = window.xvaApi.onSuspiciousActivity(() => {
+      const word = VERIFY_WORDS[Math.floor(Math.random() * VERIFY_WORDS.length)];
+      setVerifyWord(word);
+      setVerifyInput("");
+      setVerifyError(false);
+      setIsSuspicious(true);
+      // Pause timer like idle
+      if (idlePauseStartRef.current === null && manualPauseStartRef.current === null) {
+        idlePauseStartRef.current = Date.now();
+      }
+      suspiciousPeriodsRef.current.push({
+        detectedAt: new Date().toISOString(),
+        verifiedAt: null,
+        verified: false,
+      });
+    });
+    return unsub;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const confirmSuspicious = async () => {
+    if (verifyInput.trim().toLowerCase() !== verifyWord.toLowerCase()) {
+      setVerifyError(true);
+      return;
+    }
+    const last = suspiciousPeriodsRef.current[suspiciousPeriodsRef.current.length - 1];
+    if (last) { last.verifiedAt = new Date().toISOString(); last.verified = true; }
+    await window.xvaApi.resumeFromSuspicious();
+    flushIdlePause();
+    setIsSuspicious(false);
+    setVerifyInput("");
+    setVerifyError(false);
+  };
+
   const selectedProject = config.projects.find(p => p.id === selectedProjectId) ?? null;
-  const isPaused = isIdle || isManuallyPaused;
+  const isPaused = isIdle || isManuallyPaused || isSuspicious;
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   const startTimer = async () => {
@@ -186,6 +232,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       idlePauseStartRef.current = null;
       manualPauseStartRef.current = null;
       idlePeriodsRef.current = [];
+      suspiciousPeriodsRef.current = [];
+      setIsSuspicious(false);
 
       const data = await window.xvaApi.createEntry({
         description: description.trim(),
@@ -252,6 +300,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         activityScore: activityScore ?? 0,
         windowLog: windowLog.length > 0 ? windowLog : undefined,
         idlePeriods: idlePeriodsRef.current.length > 0 ? idlePeriodsRef.current : undefined,
+        suspiciousPeriods: suspiciousPeriodsRef.current.length > 0 ? suspiciousPeriodsRef.current : undefined,
       });
       setIsTracking(false);
       setCurrentEntryId(null);
@@ -355,6 +404,44 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         </div>
       )}
 
+      {/* Suspicious-activity banner */}
+      {isSuspicious && (
+        <div style={styles.suspiciousBanner}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ fontSize: 14 }}>⚠️</span>
+            <span style={{ fontWeight: 700, fontSize: 12 }}>Suspicious mouse movement detected — timer paused</span>
+          </div>
+          <p style={{ fontSize: 11, color: "#fca5a5", margin: "0 0 8px", lineHeight: 1.4 }}>
+            To resume, type the word below to confirm you're present:
+          </p>
+          <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: 6, padding: "4px 10px", display: "inline-block", marginBottom: 8 }}>
+            <span style={{ fontFamily: "monospace", fontSize: 15, fontWeight: 700, letterSpacing: 2, color: "#fff" }}>
+              {verifyWord}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              style={{
+                ...styles.suspiciousInput,
+                borderColor: verifyError ? "#ef4444" : "rgba(239,68,68,0.3)",
+              }}
+              type="text"
+              value={verifyInput}
+              onChange={e => { setVerifyInput(e.target.value); setVerifyError(false); }}
+              onKeyDown={e => { if (e.key === "Enter") confirmSuspicious(); }}
+              placeholder="Type the word…"
+              autoFocus
+            />
+            <button onClick={confirmSuspicious} style={styles.confirmBtn}>
+              Confirm I'm Here
+            </button>
+          </div>
+          {verifyError && (
+            <p style={{ fontSize: 10, color: "#ef4444", margin: "4px 0 0" }}>Incorrect — try again</p>
+          )}
+        </div>
+      )}
+
       <div style={styles.scrollArea}>
         {/* Timer display */}
         <div style={styles.timerSection}>
@@ -368,7 +455,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
           {/* Pause label */}
           {isPaused && isTracking && (
             <div style={styles.pauseLabel}>
-              {isManuallyPaused && !isIdle ? "⏸ PAUSED" : "⏸ PAUSED (IDLE)"}
+              {isSuspicious ? "⚠️ PAUSED (SUSPICIOUS)" : isManuallyPaused && !isIdle ? "⏸ PAUSED" : "⏸ PAUSED (IDLE)"}
             </div>
           )}
 
@@ -577,4 +664,19 @@ const styles: Record<string, React.CSSProperties> = {
   btnSmall: { padding: "8px 16px", background: "#1855F5", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", alignSelf: "flex-start" as const },
   btnOutline: { padding: "8px 16px", background: "transparent", border: "1px solid #1e2a3a", borderRadius: 8, color: "#94a3b8", fontSize: 12, cursor: "pointer", alignSelf: "flex-start" as const },
   btnDanger: { padding: "8px 16px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, color: "#f87171", fontSize: 12, cursor: "pointer", alignSelf: "flex-start" as const },
+  suspiciousBanner: {
+    background: "rgba(220,38,38,0.12)", borderBottom: "1px solid rgba(220,38,38,0.3)",
+    padding: "12px 16px", display: "flex", flexDirection: "column" as const,
+    fontSize: 12, color: "#fca5a5", flexShrink: 0,
+  },
+  suspiciousInput: {
+    flex: 1, padding: "7px 10px", background: "rgba(0,0,0,0.3)",
+    border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8,
+    color: "#fff", fontSize: 13, outline: "none",
+  },
+  confirmBtn: {
+    padding: "7px 12px", background: "#dc2626", border: "none",
+    borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700,
+    cursor: "pointer", whiteSpace: "nowrap" as const,
+  },
 };

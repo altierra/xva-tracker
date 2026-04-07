@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld("xvaApi", {
   // Updates
   installUpdate: () => ipcRenderer.invoke("install-update"),
 
+  // Suspicious activity
+  resumeFromSuspicious: () => ipcRenderer.invoke("resume-from-suspicious"),
+
   // External links
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
 
@@ -56,6 +59,10 @@ contextBridge.exposeInMainWorld("xvaApi", {
   onUpdateReady: (cb: () => void) => {
     ipcRenderer.on("update-ready", cb);
     return () => ipcRenderer.removeAllListeners("update-ready");
+  },
+  onSuspiciousActivity: (cb: () => void) => {
+    ipcRenderer.on("suspicious-activity", cb);
+    return () => ipcRenderer.removeAllListeners("suspicious-activity");
   },
 });
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, shell, dialog } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, shell, dialog, screen } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
@@ -28,6 +28,84 @@ let isTracking = false;
 let currentEntryId: string | null = null;
 let idleAlerted = false;
 let isQuitting = false;
+
+// ── Jiggler / suspicious-mouse detection ──────────────────────────────────────
+interface MouseSample { x: number; y: number; t: number }
+
+const JIGGLER_SAMPLE_MS       = 500;   // poll interval
+const JIGGLER_WINDOW_SAMPLES  = 60;    // samples per analysis window (= 30 s)
+const JIGGLER_SUSPICIOUS_WINS = 10;    // consecutive suspicious windows needed (= 5 min)
+const JIGGLER_DIST_THRESHOLD  = 20;    // px — avg distance between sorted clouds
+
+let mouseSamples: MouseSample[] = [];
+let jigglerInterval: ReturnType<typeof setInterval> | null = null;
+let suspiciousWindowCount = 0;
+let suspiciousAlerted = false;
+
+/** Compare two 30-s position clouds by sorting both and measuring avg point distance.
+ *  Low score → same set of coords visited twice → repetitive movement. */
+function comparePositionClouds(a: MouseSample[], b: MouseSample[]): number {
+  const sortFn = (p: MouseSample, q: MouseSample) => p.x !== q.x ? p.x - q.x : p.y - q.y;
+  const sa = [...a].sort(sortFn);
+  const sb = [...b].sort(sortFn);
+  const len = Math.min(sa.length, sb.length);
+  if (len === 0) return 999;
+  let total = 0;
+  for (let i = 0; i < len; i++) total += Math.hypot(sa[i].x - sb[i].x, sa[i].y - sb[i].y);
+  return total / len;
+}
+
+function startJigglerDetector() {
+  if (jigglerInterval) return;
+  mouseSamples = [];
+  suspiciousWindowCount = 0;
+  suspiciousAlerted = false;
+
+  jigglerInterval = setInterval(() => {
+    if (!isTracking || suspiciousAlerted || idleAlerted) return;
+
+    const { x, y } = screen.getCursorScreenPoint();
+    mouseSamples.push({ x, y, t: Date.now() });
+
+    // Only analyse once we have 2 full windows
+    if (mouseSamples.length < JIGGLER_WINDOW_SAMPLES * 2) return;
+
+    // Analyse at every window boundary
+    if (mouseSamples.length % JIGGLER_WINDOW_SAMPLES !== 0) return;
+
+    const total = mouseSamples.length;
+    const prev  = mouseSamples.slice(total - JIGGLER_WINDOW_SAMPLES * 2, total - JIGGLER_WINDOW_SAMPLES);
+    const curr  = mouseSamples.slice(total - JIGGLER_WINDOW_SAMPLES);
+
+    // If cursor didn't move at all → idle (handled by idle detector), not jiggler
+    const allSame = curr.every(s => s.x === curr[0].x && s.y === curr[0].y);
+    if (allSame) { suspiciousWindowCount = 0; return; }
+
+    const avgDist = comparePositionClouds(prev, curr);
+    if (avgDist < JIGGLER_DIST_THRESHOLD) {
+      suspiciousWindowCount++;
+    } else {
+      suspiciousWindowCount = 0;
+    }
+
+    if (suspiciousWindowCount >= JIGGLER_SUSPICIOUS_WINS) {
+      suspiciousAlerted = true;
+      mainWindow?.webContents.send("suspicious-activity");
+    }
+
+    // Trim memory: keep last 20 windows
+    if (mouseSamples.length > JIGGLER_WINDOW_SAMPLES * 20) {
+      mouseSamples = mouseSamples.slice(-JIGGLER_WINDOW_SAMPLES * 10);
+    }
+  }, JIGGLER_SAMPLE_MS);
+}
+
+function stopJigglerDetector() {
+  if (jigglerInterval) { clearInterval(jigglerInterval); jigglerInterval = null; }
+  mouseSamples = [];
+  suspiciousWindowCount = 0;
+  suspiciousAlerted = false;
+}
 
 // ── Single instance lock ───────────────────────────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
@@ -182,6 +260,7 @@ ipcMain.handle("start-tracking", async (_e, { entryId, projectConfig }: { entryI
   }
 
   startIdleMonitor();
+  startJigglerDetector();
   updateTrayMenu();
   return { ok: true };
 });
@@ -195,6 +274,7 @@ ipcMain.handle("stop-tracking", async () => {
   stopHeartbeat();
   stopScreenshotter();
   stopIdleMonitor();
+  stopJigglerDetector();
   updateTrayMenu();
   return { ok: true };
 });
@@ -202,6 +282,12 @@ ipcMain.handle("stop-tracking", async () => {
 ipcMain.handle("resume-from-idle", () => {
   idleAlerted = false;
   mainWindow?.webContents.send("idle-resumed");
+});
+
+ipcMain.handle("resume-from-suspicious", () => {
+  suspiciousAlerted = false;
+  suspiciousWindowCount = 0;
+  mouseSamples = [];
 });
 
 ipcMain.handle("get-tracking-state", () => ({
