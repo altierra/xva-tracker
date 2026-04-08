@@ -43,7 +43,8 @@ export interface XvaApi {
   getPortalUrl: () => Promise<string>;
   setPortalUrl: (url: string) => Promise<void>;
   fetchConfig: () => Promise<{ ok: boolean; data?: AgentConfig; error?: string }>;
-  startTracking: (entryId: string, projectConfig: { screenshotEnabled: boolean; screenshotIntervalMins: number }) => Promise<{ ok: boolean }>;
+  startTracking: (entryId: string, projectConfig: { screenshotEnabled: boolean; screenshotIntervalMins: number; idleThresholdMins: number }) => Promise<{ ok: boolean }>;
+  fetchUsage: (projectId: string) => Promise<{ dailySecs: number; weeklySecs: number; monthlySecs: number } | null>;
   stopTracking: () => Promise<{ ok: boolean }>;
   resumeFromIdle: () => Promise<void>;
   getTrackingState: () => Promise<{ isTracking: boolean; currentEntryId: string | null; idleThresholdMins: number }>;

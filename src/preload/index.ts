@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld("xvaApi", {
   fetchConfig: () => ipcRenderer.invoke("fetch-config"),
 
   // Tracking
-  startTracking: (entryId: string, projectConfig: { screenshotEnabled: boolean; screenshotIntervalMins: number }) =>
+  startTracking: (entryId: string, projectConfig: { screenshotEnabled: boolean; screenshotIntervalMins: number; idleThresholdMins: number }) =>
     ipcRenderer.invoke("start-tracking", { entryId, projectConfig }),
   stopTracking: () => ipcRenderer.invoke("stop-tracking"),
   resumeFromIdle: () => ipcRenderer.invoke("resume-from-idle"),
@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("xvaApi", {
 
   // Platform info
   platform: process.platform,
+
+  // Fetch project usage for client-side limit enforcement
+  fetchUsage: (projectId: string) => ipcRenderer.invoke("fetch-usage", projectId),
 
   // Updates
   installUpdate: () => ipcRenderer.invoke("install-update"),

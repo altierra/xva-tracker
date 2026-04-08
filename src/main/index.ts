@@ -207,13 +207,15 @@ export function updateTrayMenu() {
 
 // ── Idle monitoring ────────────────────────────────────────────────────────────
 let idleInterval: ReturnType<typeof setInterval> | null = null;
+let activeIdleThresholdMins = store.get("idleThresholdMins") as number;
 
-function startIdleMonitor() {
+function startIdleMonitor(idleThresholdMins?: number) {
   if (idleInterval) return;
+  if (idleThresholdMins !== undefined) activeIdleThresholdMins = idleThresholdMins;
   idleInterval = setInterval(() => {
     if (!isTracking) return;
     const idleSecs = powerMonitor.getSystemIdleTime();
-    const thresholdSecs = (store.get("idleThresholdMins") as number) * 60;
+    const thresholdSecs = activeIdleThresholdMins * 60;
     if (idleSecs >= thresholdSecs && !idleAlerted) {
       idleAlerted = true;
       mainWindow?.webContents.send("idle-detected", { idleSecs });
@@ -259,7 +261,7 @@ ipcMain.handle("start-tracking", async (_e, { entryId, projectConfig }: { entryI
     startScreenshotter(entryId, store.get("token") as string, store.get("portalUrl") as string, projectConfig.screenshotIntervalMins);
   }
 
-  startIdleMonitor();
+  startIdleMonitor(projectConfig.idleThresholdMins);
   startJigglerDetector();
   updateTrayMenu();
   return { ok: true };
@@ -342,6 +344,20 @@ ipcMain.handle("patch-entry", async (_e, id: string, body: Record<string, unknow
   return data;
 });
 
+// Fetch current usage for a project (for client-side limit enforcement)
+ipcMain.handle("fetch-usage", async (_e, projectId: string) => {
+  const token = store.get("token") as string;
+  const portalUrl = store.get("portalUrl") as string;
+  if (!token || !projectId) return null;
+  try {
+    const res = await fetch(`${portalUrl}/api/timetracker/usage?projectId=${encodeURIComponent(projectId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return await res.json() as { dailySecs: number; weeklySecs: number; monthlySecs: number };
+  } catch { return null; }
+});
+
 // Activity log (summary for in-app display)
 ipcMain.handle("get-activity-log", () => getActivitySummary());
 // Full window log (detailed, sent to portal on stop)
@@ -388,4 +404,5 @@ app.on("activate", () => {
 export interface ProjectConfig {
   screenshotEnabled: boolean;
   screenshotIntervalMins: number;
+  idleThresholdMins: number;
 }

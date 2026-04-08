@@ -76,6 +76,14 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // Collect idle periods to send to portal on stop
   const idlePeriodsRef = useRef<{ start: string; end: string; durationSecs: number }[]>([]);
 
+  // ─── Limit enforcement refs ───────────────────────────────────────────────
+  const usageAtStartRef = useRef<{ dailySecs: number; weeklySecs: number; monthlySecs: number } | null>(null);
+  const selectedProjectRef = useRef(selectedProject);
+  useEffect(() => { selectedProjectRef.current = selectedProject; }, [selectedProject]);
+  const limitTriggeredRef = useRef(false);
+  // Keep stopTimer ref fresh so the timer interval can call it
+  const stopTimerRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
   // Total paused ms right now (both sources combined)
   const totalPausedMs = useCallback(() => {
     const idleMs = idlePauseStartRef.current !== null ? Date.now() - idlePauseStartRef.current : 0;
@@ -129,11 +137,32 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // immediately shows the correct net value via totalPausedMs().
   useEffect(() => {
     if (isTracking && startTime && !isPaused) {
+      limitTriggeredRef.current = false;
       timerRef.current = setInterval(() => {
         const net = Math.max(0, Date.now() - startTime.getTime() - totalPausedMs());
         const secs = Math.floor(net / 1000);
         elapsedRef.current = secs;
         setElapsed(secs);
+
+        // ── Client-side limit enforcement (Bug 1 fix) ──────────────────────
+        if (limitTriggeredRef.current) return;
+        const proj = selectedProjectRef.current;
+        const usage = usageAtStartRef.current;
+        if (!proj || !usage) return;
+        const checks = [
+          { type: "daily",   limitSecs: (proj.dailyLimitMins   ?? 0) * 60, usedSecs: usage.dailySecs   + secs },
+          { type: "weekly",  limitSecs: (proj.weeklyLimitMins  ?? 0) * 60, usedSecs: usage.weeklySecs  + secs },
+          { type: "monthly", limitSecs: (proj.monthlyLimitMins ?? 0) * 60, usedSecs: usage.monthlySecs + secs },
+        ];
+        for (const { type, limitSecs, usedSecs } of checks) {
+          if (limitSecs > 0 && usedSecs >= limitSecs) {
+            limitTriggeredRef.current = true;
+            stopTimerRef.current().then(() => {
+              setError(`${type.charAt(0).toUpperCase() + type.slice(1)} limit reached — timer stopped automatically.`);
+            });
+            break;
+          }
+        }
       }, 1000);
     } else {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -232,12 +261,14 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     setError("");
     try {
       const now = new Date();
-      // Reset all pause state
+      // Reset all pause and limit state
       pauseOffsetRef.current = 0;
       idlePauseStartRef.current = null;
       manualPauseStartRef.current = null;
       idlePeriodsRef.current = [];
       suspiciousPeriodsRef.current = [];
+      usageAtStartRef.current = null;
+      limitTriggeredRef.current = false;
       setIsSuspicious(false);
 
       const data = await window.xvaApi.createEntry({
@@ -252,10 +283,15 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       setCurrentEntryId(entryId);
       setStartTime(now);
       setIsTracking(true);
-      const pc = selectedProject ?? { screenshotEnabled: false, screenshotIntervalMins: 10 };
+      const pc = selectedProject ?? { screenshotEnabled: false, screenshotIntervalMins: 10, idleThresholdMins: 10 };
+      // Fetch current usage so the timer can enforce limits mid-session (Bug 1)
+      if (selectedProjectId) {
+        usageAtStartRef.current = await window.xvaApi.fetchUsage(selectedProjectId).catch(() => null);
+      }
       await window.xvaApi.startTracking(entryId, {
         screenshotEnabled: pc.screenshotEnabled,
         screenshotIntervalMins: pc.screenshotIntervalMins,
+        idleThresholdMins: (pc as typeof selectedProject & { idleThresholdMins?: number })?.idleThresholdMins ?? 10,
       });
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e);
@@ -324,6 +360,10 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     }
     setLoading(false);
   };
+
+  // Keep stopTimerRef current so the limit-check interval can call it
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { stopTimerRef.current = stopTimer; });
 
   const savePortalUrl = async () => {
     await window.xvaApi.setPortalUrl(newPortalUrl.trim());
