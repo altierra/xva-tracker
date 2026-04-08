@@ -78,8 +78,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
 
   // ─── Limit enforcement refs ───────────────────────────────────────────────
   const usageAtStartRef = useRef<{ dailySecs: number; weeklySecs: number; monthlySecs: number } | null>(null);
-  const selectedProjectRef = useRef(selectedProject);
-  useEffect(() => { selectedProjectRef.current = selectedProject; }, [selectedProject]);
+  // Initialized to null — synced after selectedProject is computed below
+  const selectedProjectRef = useRef<typeof selectedProject>(null);
   const limitTriggeredRef = useRef(false);
   // Keep stopTimer ref fresh so the timer interval can call it
   const stopTimerRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -253,6 +253,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   };
 
   const selectedProject = config.projects.find(p => p.id === selectedProjectId) ?? null;
+  // Sync ref now that selectedProject is computed (was null at ref init above)
+  useEffect(() => { selectedProjectRef.current = selectedProject; }, [selectedProject]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   const startTimer = async () => {
