@@ -444,7 +444,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       {/* Idle banner */}
       {isIdle && (
         <div style={styles.idleBanner}>
-          <span>💤 Idle detected ({Math.round(idleSecs / 60)} min) — timer paused</span>
+          <span>⏸ Timer paused after {selectedProject?.idleThresholdMins ?? 10} min of inactivity · Away for {Math.round(idleSecs / 60)} min</span>
           <button onClick={resumeFromIdle} style={styles.resumeBtn}>I'm back</button>
         </div>
       )}
