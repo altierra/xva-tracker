@@ -85,7 +85,13 @@ function startJigglerDetector() {
       if (longDensity >= JIGGLER_LONG_DENSITY) {
         suspiciousAlerted = true;
         surfaceWindow();
-        mainWindow?.webContents.send("suspicious-activity");
+        reportOffense("jiggler").then(action => {
+          if (action === "warn") {
+            mainWindow?.webContents.send("suspicious-activity", { offense: 1 });
+          } else {
+            handleOffenseResult("jiggler", action);
+          }
+        });
         return;
       }
     }
@@ -112,7 +118,13 @@ function startJigglerDetector() {
     if (suspiciousWindowCount >= JIGGLER_SUSPICIOUS_WINS) {
       suspiciousAlerted = true;
       surfaceWindow();
-      mainWindow?.webContents.send("suspicious-activity");
+      reportOffense("jiggler").then(action => {
+        if (action === "warn") {
+          mainWindow?.webContents.send("suspicious-activity", { offense: 1 });
+        } else {
+          handleOffenseResult("jiggler", action);
+        }
+      });
     }
 
     // Trim memory: keep last 10-min long-window worth of samples
@@ -127,6 +139,67 @@ function stopJigglerDetector() {
   mouseSamples = [];
   suspiciousWindowCount = 0;
   suspiciousAlerted = false;
+}
+
+// ── Compliance: offense reporting ─────────────────────────────────────────────
+/**
+ * Report an idle or jiggler offense to the portal.
+ * Returns the action to take: "warn" | "close_day" | "suspend" | "already_closed" | "already_suspended"
+ */
+async function reportOffense(type: "idle" | "jiggler"): Promise<string> {
+  const token     = store.get("token") as string;
+  const portalUrl = store.get("portalUrl") as string;
+  if (!token || !portalUrl) return "warn";
+  try {
+    const res = await fetch(`${portalUrl}/api/timetracker/offense`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ type }),
+    });
+    if (!res.ok) return "warn";
+    const data = await res.json() as { action?: string };
+    return data.action ?? "warn";
+  } catch {
+    return "warn"; // fail-safe: treat as first warning if portal unreachable
+  }
+}
+
+/**
+ * Forcibly stop the current tracking session from the main process.
+ * Notifies the renderer to finalize and save the entry.
+ */
+async function forceStopTracking() {
+  isTracking = false;
+  currentEntryId = null;
+  idleAlerted = false;
+  stopWindowLogger();
+  stopHeartbeat();
+  stopScreenshotter();
+  stopIdleMonitor();
+  stopMeetingDetector();
+  stopJigglerDetector();
+  updateTrayMenu();
+  // Tell renderer to finalize (save) the entry
+  mainWindow?.webContents.send("force-stop-tracking");
+}
+
+/**
+ * Handle offense result from portal: fire appropriate event to renderer or stop tracking.
+ */
+async function handleOffenseResult(type: "idle" | "jiggler", action: string) {
+  if (action === "warn") {
+    // Already sent the primary event (idle-detected / suspicious-activity) with offense:1
+    // Nothing extra to do here
+    return;
+  }
+  if (action === "close_day" || action === "already_closed") {
+    // Stop tracking and tell renderer the day is closed
+    await forceStopTracking();
+    mainWindow?.webContents.send("day-closed", { reason: type });
+  } else if (action === "suspend" || action === "already_suspended") {
+    await forceStopTracking();
+    mainWindow?.webContents.send("tracker-suspended", { reason: type });
+  }
 }
 
 // ── Single instance lock ───────────────────────────────────────────────────────
@@ -354,7 +427,18 @@ function startIdleMonitor(idleThresholdMins?: number) {
       }
       idleAlerted = true;
       surfaceWindow();
-      mainWindow?.webContents.send("idle-detected", { idleSecs });
+      reportOffense("idle").then(action => {
+        if (action === "warn") {
+          mainWindow?.webContents.send("idle-detected", { idleSecs, offense: 1 });
+        } else if (action === "already_closed" || action === "already_suspended") {
+          handleOffenseResult("idle", action);
+        } else {
+          // close_day or suspend — send idle event with offense:2 first so renderer
+          // can show the "day closed" banner, then force-stop
+          mainWindow?.webContents.send("idle-detected", { idleSecs, offense: 2 });
+          handleOffenseResult("idle", action);
+        }
+      });
     }
     // Send idle status to renderer every tick
     mainWindow?.webContents.send("idle-status", { idleSecs, isIdle: idleSecs >= thresholdSecs });
@@ -428,6 +512,27 @@ ipcMain.handle("resume-from-suspicious", () => {
   suspiciousAlerted = false;
   suspiciousWindowCount = 0;
   mouseSamples = [];
+});
+
+ipcMain.handle("report-offense", async (_e, type: "idle" | "jiggler") => {
+  const action = await reportOffense(type);
+  await handleOffenseResult(type, action);
+  return action;
+});
+
+ipcMain.handle("check-suspension", async () => {
+  const token     = store.get("token") as string;
+  const portalUrl = store.get("portalUrl") as string;
+  if (!token || !portalUrl) return { suspended: false };
+  try {
+    const res = await fetch(`${portalUrl}/api/timetracker/suspension-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { suspended: false };
+    return await res.json();
+  } catch {
+    return { suspended: false };
+  }
 });
 
 ipcMain.handle("get-tracking-state", () => ({

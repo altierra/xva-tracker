@@ -57,6 +57,13 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const [verifyInput, setVerifyInput] = useState("");
   const [verifyError, setVerifyError] = useState(false);
   const suspiciousPeriodsRef = useRef<{ detectedAt: string; verifiedAt: string | null; verified: boolean }[]>([]);
+
+  // ─── Compliance: offense / suspension state ──────────────────────────────
+  const [idleOffenseCount, setIdleOffenseCount] = useState(0);
+  const [jigglerOffenseCount, setJigglerOffenseCount] = useState(0);
+  const [dayClosedReason, setDayClosedReason] = useState<"idle" | "jiggler" | null>(null);
+  const [isSuspended, setIsSuspended]   = useState(false);
+  const [suspendedReason, setSuspendedReason] = useState<"idle" | "jiggler" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [portalUrl, setPortalUrl] = useState("https://altierraxva.com");
   const [newPortalUrl, setNewPortalUrl] = useState("");
@@ -176,9 +183,10 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // Having elapsed here would tear down/re-add the IPC listener every second,
   // which can cause the one-shot "idle-detected" event to be silently dropped.
   useEffect(() => {
-    const unsubIdle = window.xvaApi.onIdleDetected(({ idleSecs: s }) => {
+    const unsubIdle = window.xvaApi.onIdleDetected(({ idleSecs: s, offense }) => {
       setIsIdle(true);
       setIdleSecs(s);
+      if (offense) setIdleOffenseCount(offense);
       // Only start idle pause if not already idle-paused
       if (idlePauseStartRef.current === null) {
         // Back-date pause start to when idle actually began
@@ -218,7 +226,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
 
   // ─── Suspicious-activity listener ────────────────────────────────────────
   useEffect(() => {
-    const unsub = window.xvaApi.onSuspiciousActivity(() => {
+    const unsub = window.xvaApi.onSuspiciousActivity(({ offense }) => {
+      setJigglerOffenseCount(offense ?? 1);
       const word = VERIFY_WORDS[Math.floor(Math.random() * VERIFY_WORDS.length)];
       setVerifyWord(word);
       setVerifyInput("");
@@ -234,7 +243,24 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         verified: false,
       });
     });
-    return unsub;
+
+    // Day closed by compliance (2nd offense)
+    const unsubDayClosed = window.xvaApi.onDayClosed(({ reason }) => {
+      setDayClosedReason(reason);
+    });
+
+    // Indefinitely suspended
+    const unsubSuspended = window.xvaApi.onTrackerSuspended(({ reason }) => {
+      setIsSuspended(true);
+      setSuspendedReason(reason);
+    });
+
+    // Force-stop: finalize the current entry (main already stopped tracking)
+    const unsubForceStop = window.xvaApi.onForceStop(() => {
+      stopTimer(); // save entry to portal
+    });
+
+    return () => { unsub(); unsubDayClosed(); unsubSuspended(); unsubForceStop(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -262,6 +288,15 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     setLoading(true);
     setError("");
     try {
+      // Check if the VA is suspended before starting
+      const suspStatus = await window.xvaApi.checkSuspension();
+      if (suspStatus?.suspended) {
+        setIsSuspended(true);
+        setSuspendedReason(suspStatus.reason ?? null);
+        setLoading(false);
+        return;
+      }
+
       const now = new Date();
       // Reset all pause and limit state
       pauseOffsetRef.current = 0;
@@ -272,6 +307,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       usageAtStartRef.current = null;
       limitTriggeredRef.current = false;
       setIsSuspicious(false);
+      setDayClosedReason(null);
+      setIdleOffenseCount(0);
+      setJigglerOffenseCount(0);
 
       const data = await window.xvaApi.createEntry({
         description: description.trim(),
@@ -460,20 +498,76 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* Idle banner */}
-      {isIdle && (
+      {/* ── Suspended overlay — blocks entire UI ─────────────────────────── */}
+      {isSuspended && (
+        <div style={styles.overlayBlock}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔒</div>
+          <p style={{ fontWeight: 700, fontSize: 13, color: "#f87171", marginBottom: 6 }}>
+            Time Tracking Suspended
+          </p>
+          <p style={{ fontSize: 11, color: "#94a3b8", marginBottom: 12, lineHeight: 1.5, textAlign: "center", maxWidth: 240 }}>
+            Repeated {suspendedReason === "jiggler" ? "suspicious mouse movement" : "idle time"} violations have been recorded.
+            A formal notice has been sent to your email.
+          </p>
+          <p style={{ fontSize: 11, color: "#94a3b8", marginBottom: 14, lineHeight: 1.5, textAlign: "center", maxWidth: 240 }}>
+            Submit an explanation letter to request reactivation.
+          </p>
+          <button
+            onClick={() => window.xvaApi.openExternal(`${portalUrl}/dashboard/va/timetracker/explanation`)}
+            style={{ ...styles.confirmBtn, fontSize: 11, padding: "6px 14px" }}
+          >
+            Submit Explanation →
+          </button>
+        </div>
+      )}
+
+      {/* ── Day closed banner — today's tracking is locked ────────────────── */}
+      {dayClosedReason && !isSuspended && (
+        <div style={{ ...styles.suspiciousBanner, background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.3)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{ fontSize: 14 }}>🚫</span>
+            <span style={{ fontWeight: 700, fontSize: 12, color: "#f87171" }}>
+              Time Tracking Closed for Today — 2nd Offense
+            </span>
+          </div>
+          <p style={{ fontSize: 11, color: "#fca5a5", margin: "0 0 4px", lineHeight: 1.4 }}>
+            {dayClosedReason === "jiggler"
+              ? "Suspicious mouse movement was detected twice in this session."
+              : "Idle time was detected twice in this session."}
+          </p>
+          <p style={{ fontSize: 11, color: "#94a3b8", margin: 0, lineHeight: 1.4 }}>
+            A formal warning letter has been sent to your email. Tracking will resume tomorrow.
+            A further violation on another day will result in an indefinite suspension.
+          </p>
+        </div>
+      )}
+
+      {/* ── Idle banner ───────────────────────────────────────────────────── */}
+      {isIdle && !dayClosedReason && (
         <div style={styles.idleBanner}>
+          {idleOffenseCount === 1 && (
+            <span style={{ fontSize: 10, background: "rgba(245,158,11,0.2)", color: "#fbbf24", borderRadius: 4, padding: "1px 6px", marginRight: 6, fontWeight: 700 }}>
+              1ST WARNING
+            </span>
+          )}
           <span>⏸ Timer paused after {selectedProject?.idleThresholdMins ?? 10} min of inactivity · Away for {Math.round(idleSecs / 60)} min</span>
           <button onClick={resumeFromIdle} style={styles.resumeBtn}>I'm back</button>
         </div>
       )}
 
-      {/* Suspicious-activity banner */}
-      {isSuspicious && (
+      {/* ── Suspicious-activity banner ────────────────────────────────────── */}
+      {isSuspicious && !dayClosedReason && (
         <div style={styles.suspiciousBanner}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <span style={{ fontSize: 14 }}>⚠️</span>
-            <span style={{ fontWeight: 700, fontSize: 12 }}>Suspicious mouse movement detected — timer paused</span>
+            <span style={{ fontWeight: 700, fontSize: 12 }}>
+              Suspicious mouse movement detected
+              {jigglerOffenseCount === 1 && (
+                <span style={{ marginLeft: 6, fontSize: 10, background: "rgba(245,158,11,0.25)", color: "#fbbf24", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>
+                  1ST WARNING
+                </span>
+              )}
+            </span>
           </div>
           <p style={{ fontSize: 11, color: "#fca5a5", margin: "0 0 8px", lineHeight: 1.4 }}>
             To resume, type the word below to confirm you're present:
@@ -665,6 +759,12 @@ const styles: Record<string, React.CSSProperties> = {
   topBarActions: { display: "flex", gap: 4, WebkitAppRegion: "no-drag" as unknown as undefined },
   iconBtn: { background: "none", border: "none", color: "#475569", fontSize: 16, cursor: "pointer", padding: "4px 6px", borderRadius: 6 },
   backBtn: { background: "none", border: "none", color: "#475569", fontSize: 12, cursor: "pointer", padding: "4px 0", width: 60, textAlign: "left" as const },
+  overlayBlock: {
+    position: "absolute" as const, inset: 0, zIndex: 99,
+    background: "rgba(10,12,18,0.97)",
+    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    padding: 24, textAlign: "center",
+  },
   idleBanner: {
     background: "rgba(245,158,11,0.12)", borderBottom: "1px solid rgba(245,158,11,0.25)",
     padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between",

@@ -39,11 +39,15 @@ contextBridge.exposeInMainWorld("xvaApi", {
   // Suspicious activity
   resumeFromSuspicious: () => ipcRenderer.invoke("resume-from-suspicious"),
 
+  // Compliance — offense reporting & suspension status
+  reportOffense: (type: "idle" | "jiggler") => ipcRenderer.invoke("report-offense", type),
+  checkSuspension: () => ipcRenderer.invoke("check-suspension"),
+
   // External links
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
 
   // Events from main → renderer
-  onIdleDetected: (cb: (payload: { idleSecs: number }) => void) => {
+  onIdleDetected: (cb: (payload: { idleSecs: number; offense?: number; closeDay?: boolean }) => void) => {
     ipcRenderer.on("idle-detected", (_e, payload) => cb(payload));
     return () => ipcRenderer.removeAllListeners("idle-detected");
   },
@@ -63,9 +67,21 @@ contextBridge.exposeInMainWorld("xvaApi", {
     ipcRenderer.on("update-ready", cb);
     return () => ipcRenderer.removeAllListeners("update-ready");
   },
-  onSuspiciousActivity: (cb: () => void) => {
-    ipcRenderer.on("suspicious-activity", cb);
+  onSuspiciousActivity: (cb: (payload: { offense?: number }) => void) => {
+    ipcRenderer.on("suspicious-activity", (_e, payload) => cb(payload ?? {}));
     return () => ipcRenderer.removeAllListeners("suspicious-activity");
+  },
+  onDayClosed: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => {
+    ipcRenderer.on("day-closed", (_e, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners("day-closed");
+  },
+  onTrackerSuspended: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => {
+    ipcRenderer.on("tracker-suspended", (_e, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners("tracker-suspended");
+  },
+  onForceStop: (cb: () => void) => {
+    ipcRenderer.on("force-stop-tracking", cb);
+    return () => ipcRenderer.removeAllListeners("force-stop-tracking");
   },
 });
 
