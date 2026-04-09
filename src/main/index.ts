@@ -2,6 +2,8 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, she
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
+import { execSync } from "child_process";
+import activeWin from "active-win";
 import { startWindowLogger, stopWindowLogger, getActivitySummary, getWindowLog } from "./windowLogger";
 import { startScreenshotter, stopScreenshotter } from "./screenshotter";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
@@ -242,6 +244,98 @@ function surfaceWindow() {
   setTimeout(() => mainWindow?.setAlwaysOnTop(false), 8000);
 }
 
+// ── Meeting detection ─────────────────────────────────────────────────────────
+// Option B — app/window title keywords (VA switched to take notes mid-meeting)
+const MEETING_APP_NAMES = [
+  "zoom.us", "zoom",
+  "microsoft teams", "msteams", "com.microsoft.teams2",
+  "webex",
+  "facetime",
+  "skype",
+  "discord",
+];
+const MEETING_TITLE_KEYWORDS = [
+  "zoom meeting",
+  "google meet", "meet.google",
+  "microsoft teams",
+  "webex meeting",
+  "whereby",
+  "facetime",
+  "on a call",
+];
+
+// Option C — 15-min grace period after last confirmed meeting signal
+const MEETING_GRACE_MS = 15 * 60 * 1000;
+
+let lastMeetingSeenAt = 0;
+let meetingDetected   = false;
+let meetingPollInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Option C — check if the microphone is actively capturing audio on macOS.
+ * IOAudioEngineState = 3 means the audio engine is running (input or output).
+ * Using this as the primary signal: if audio is live, assume a call is happening.
+ */
+function isMicrophoneInUse(): boolean {
+  if (process.platform !== "darwin") return false;
+  try {
+    const out = execSync(
+      'ioreg -l 2>/dev/null | grep -c \'"IOAudioEngineState" = 3\'',
+      { encoding: "utf8", timeout: 2000, stdio: ["pipe", "pipe", "pipe"] }
+    ).trim();
+    return parseInt(out, 10) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Runs every 10 s while tracking — updates meetingDetected flag. */
+async function pollMeetingState(): Promise<void> {
+  try {
+    // Option C: microphone is live
+    const micInUse = isMicrophoneInUse();
+
+    // Option B: active window belongs to a known meeting app or URL
+    let windowIsMeeting = false;
+    const win = await activeWin();
+    if (win) {
+      const title = (win.title ?? "").toLowerCase();
+      const appName = (win.owner?.name ?? "").toLowerCase();
+      windowIsMeeting =
+        MEETING_APP_NAMES.some(n => appName.includes(n)) ||
+        MEETING_TITLE_KEYWORDS.some(k => title.includes(k));
+    }
+
+    if (micInUse || windowIsMeeting) {
+      lastMeetingSeenAt = Date.now();
+      meetingDetected   = true;
+      console.log(`[meeting] active — mic:${micInUse} window:${windowIsMeeting}`);
+    } else if (lastMeetingSeenAt > 0 && Date.now() - lastMeetingSeenAt < MEETING_GRACE_MS) {
+      meetingDetected = true;
+      const minsSince = Math.round((Date.now() - lastMeetingSeenAt) / 60000);
+      console.log(`[meeting] grace period — ${minsSince}m since last signal`);
+    } else {
+      meetingDetected = false;
+    }
+  } catch {
+    meetingDetected = false;
+  }
+}
+
+function startMeetingDetector() {
+  if (meetingPollInterval) return;
+  lastMeetingSeenAt = 0;
+  meetingDetected   = false;
+  pollMeetingState();                                          // immediate first check
+  meetingPollInterval = setInterval(pollMeetingState, 10_000);
+}
+
+function stopMeetingDetector() {
+  if (meetingPollInterval) { clearInterval(meetingPollInterval); meetingPollInterval = null; }
+  lastMeetingSeenAt = 0;
+  meetingDetected   = false;
+}
+
 // ── Idle monitoring ────────────────────────────────────────────────────────────
 let idleInterval: ReturnType<typeof setInterval> | null = null;
 let activeIdleThresholdMins = store.get("idleThresholdMins") as number;
@@ -254,6 +348,10 @@ function startIdleMonitor(idleThresholdMins?: number) {
     const idleSecs = powerMonitor.getSystemIdleTime();
     const thresholdSecs = activeIdleThresholdMins * 60;
     if (idleSecs >= thresholdSecs && !idleAlerted) {
+      if (meetingDetected) {
+        console.log("[idle] suppressed — meeting in progress or within grace period");
+        return;
+      }
       idleAlerted = true;
       surfaceWindow();
       mainWindow?.webContents.send("idle-detected", { idleSecs });
@@ -300,6 +398,7 @@ ipcMain.handle("start-tracking", async (_e, { entryId, projectConfig }: { entryI
   }
 
   startIdleMonitor(projectConfig.idleThresholdMins);
+  startMeetingDetector();
   startJigglerDetector();
   updateTrayMenu();
   return { ok: true };
@@ -314,6 +413,7 @@ ipcMain.handle("stop-tracking", async () => {
   stopHeartbeat();
   stopScreenshotter();
   stopIdleMonitor();
+  stopMeetingDetector();
   stopJigglerDetector();
   updateTrayMenu();
   return { ok: true };
