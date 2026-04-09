@@ -326,40 +326,57 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     if (!currentEntryId) return;
     setLoading(true);
     setError("");
+
+    // Capture everything before clearing state
+    const entryId = currentEntryId;
+    const stoppedElapsed = elapsed;
+    const stoppedActivityScore = activityScore;
+    const stoppedIdlePeriods = [...idlePeriodsRef.current];
+    const stoppedSuspiciousPeriods = [...suspiciousPeriodsRef.current];
+
+    // Finalize both pauses so elapsed is accurate
+    flushIdlePause();
+    flushManualPause();
+
+    // Fetch full window log before stopping
+    let windowLog: unknown[] = [];
+    try { windowLog = await window.xvaApi.getWindowLog(); } catch { /* no-op */ }
+
+    // Stop local tracking first — always succeeds
+    await window.xvaApi.stopTracking();
+
+    // Reset UI state immediately so the timer stops regardless of portal sync
+    setIsTracking(false);
+    setCurrentEntryId(null);
+    setStartTime(null);
+    setIsIdle(false);
+    setIsManuallyPaused(false);
+    setIsSuspicious(false);
+    setActivityScore(null);
+    setActivityLog([]);
+    setShowActivity(false);
+    setDescription("");
+    pauseOffsetRef.current = 0;
+    idlePauseStartRef.current = null;
+    manualPauseStartRef.current = null;
+    idlePeriodsRef.current = [];
+    suspiciousPeriodsRef.current = [];
+
+    // Sync with portal — show error if it fails but don't block the user
     try {
-      // Finalize both pauses so elapsed is accurate
-      flushIdlePause();
-      flushManualPause();
-
-      // Fetch full window log before stopping (clears on next startTracking)
-      let windowLog: unknown[] = [];
-      try { windowLog = await window.xvaApi.getWindowLog(); } catch { /* no-op */ }
-
-      await window.xvaApi.stopTracking();
-      await window.xvaApi.patchEntry(currentEntryId, {
+      await window.xvaApi.patchEntry(entryId, {
         isRunning: false,
         endTime: new Date().toISOString(),
-        duration: elapsed,
-        activityScore: activityScore ?? 0,
+        duration: stoppedElapsed,
+        activityScore: stoppedActivityScore ?? 0,
         windowLog: windowLog.length > 0 ? windowLog : undefined,
-        idlePeriods: idlePeriodsRef.current.length > 0 ? idlePeriodsRef.current : undefined,
-        suspiciousPeriods: suspiciousPeriodsRef.current.length > 0 ? suspiciousPeriodsRef.current : undefined,
+        idlePeriods: stoppedIdlePeriods.length > 0 ? stoppedIdlePeriods : undefined,
+        suspiciousPeriods: stoppedSuspiciousPeriods.length > 0 ? stoppedSuspiciousPeriods : undefined,
       });
-      setIsTracking(false);
-      setCurrentEntryId(null);
-      setStartTime(null);
-      setIsIdle(false);
-      setIsManuallyPaused(false);
-      setActivityScore(null);
-      setActivityLog([]);
-      setShowActivity(false);
-      setDescription("");
-      pauseOffsetRef.current = 0;
-      idlePauseStartRef.current = null;
-      manualPauseStartRef.current = null;
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to stop timer.");
+      setError(e instanceof Error ? e.message : "Failed to sync with portal.");
     }
+
     setLoading(false);
   };
 

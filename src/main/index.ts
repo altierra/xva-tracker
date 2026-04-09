@@ -32,27 +32,30 @@ let isQuitting = false;
 // ── Jiggler / suspicious-mouse detection ──────────────────────────────────────
 interface MouseSample { x: number; y: number; t: number }
 
-const JIGGLER_SAMPLE_MS       = 500;   // poll interval
-const JIGGLER_WINDOW_SAMPLES  = 60;    // samples per analysis window (= 30 s)
-const JIGGLER_SUSPICIOUS_WINS = 10;    // consecutive suspicious windows needed (= 5 min)
-const JIGGLER_DIST_THRESHOLD  = 20;    // px — avg distance between sorted clouds
+const JIGGLER_SAMPLE_MS        = 500;   // poll interval (ms)
+const JIGGLER_WINDOW_SAMPLES   = 60;    // samples per short window (= 30 s)
+const JIGGLER_SUSPICIOUS_WINS  = 4;     // consecutive suspicious short-windows needed (≈ 2.5–3 min)
+const JIGGLER_SHORT_DENSITY    = 0.95;  // ≥95% of ticks moved in a 30-s window → suspicious
+const JIGGLER_LONG_DENSITY     = 0.90;  // ≥90% of ticks moved over 10 min → definite jiggler
 
 let mouseSamples: MouseSample[] = [];
 let jigglerInterval: ReturnType<typeof setInterval> | null = null;
 let suspiciousWindowCount = 0;
 let suspiciousAlerted = false;
 
-/** Compare two 30-s position clouds by sorting both and measuring avg point distance.
- *  Low score → same set of coords visited twice → repetitive movement. */
-function comparePositionClouds(a: MouseSample[], b: MouseSample[]): number {
-  const sortFn = (p: MouseSample, q: MouseSample) => p.x !== q.x ? p.x - q.x : p.y - q.y;
-  const sa = [...a].sort(sortFn);
-  const sb = [...b].sort(sortFn);
-  const len = Math.min(sa.length, sb.length);
-  if (len === 0) return 999;
-  let total = 0;
-  for (let i = 0; i < len; i++) total += Math.hypot(sa[i].x - sb[i].x, sa[i].y - sb[i].y);
-  return total / len;
+/**
+ * Movement density — fraction of 500 ms ticks where the cursor actually moved.
+ * A jiggler moves on nearly every tick (density → 1.0).
+ * A human parks the mouse most of the time (density → 0.1–0.4).
+ * This signal is immune to macOS cursor acceleration, circle size, and pattern shape.
+ */
+function movementDensity(samples: MouseSample[]): number {
+  if (samples.length < 2) return 0;
+  let moved = 0;
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].x !== samples[i - 1].x || samples[i].y !== samples[i - 1].y) moved++;
+  }
+  return moved / (samples.length - 1);
 }
 
 function startJigglerDetector() {
@@ -61,28 +64,43 @@ function startJigglerDetector() {
   suspiciousWindowCount = 0;
   suspiciousAlerted = false;
 
+  // Long-window size: 10 min at 500 ms/sample = 1200 samples
+  const LONG_WINDOW = 1200;
+
   jigglerInterval = setInterval(() => {
-    if (!isTracking || suspiciousAlerted || idleAlerted) return;
+    // NOTE: intentionally NOT skipping when idleAlerted — a jiggler defeats
+    // idle detection and that's exactly the case we want to catch.
+    if (!isTracking || suspiciousAlerted) return;
 
     const { x, y } = screen.getCursorScreenPoint();
     mouseSamples.push({ x, y, t: Date.now() });
 
-    // Only analyse once we have 2 full windows
-    if (mouseSamples.length < JIGGLER_WINDOW_SAMPLES * 2) return;
+    // ── Long-window check (10 min rolling, triggers immediately) ──────────────
+    if (mouseSamples.length >= LONG_WINDOW) {
+      const longWindow = mouseSamples.slice(-LONG_WINDOW);
+      const longDensity = movementDensity(longWindow);
+      console.log(`[jiggler] long-window density=${longDensity.toFixed(3)} (threshold ${JIGGLER_LONG_DENSITY})`);
+      if (longDensity >= JIGGLER_LONG_DENSITY) {
+        suspiciousAlerted = true;
+        mainWindow?.webContents.send("suspicious-activity");
+        return;
+      }
+    }
 
-    // Analyse at every window boundary
+    // ── Short-window check (30 s = 60 samples, requires N consecutive wins) ──
+    if (mouseSamples.length < JIGGLER_WINDOW_SAMPLES) return;
     if (mouseSamples.length % JIGGLER_WINDOW_SAMPLES !== 0) return;
 
-    const total = mouseSamples.length;
-    const prev  = mouseSamples.slice(total - JIGGLER_WINDOW_SAMPLES * 2, total - JIGGLER_WINDOW_SAMPLES);
-    const curr  = mouseSamples.slice(total - JIGGLER_WINDOW_SAMPLES);
+    const shortWindow = mouseSamples.slice(-JIGGLER_WINDOW_SAMPLES);
+    const shortDensity = movementDensity(shortWindow);
 
-    // If cursor didn't move at all → idle (handled by idle detector), not jiggler
-    const allSame = curr.every(s => s.x === curr[0].x && s.y === curr[0].y);
-    if (allSame) { suspiciousWindowCount = 0; return; }
+    console.log(
+      `[jiggler] short-window density=${shortDensity.toFixed(3)}` +
+      ` (threshold ${JIGGLER_SHORT_DENSITY})` +
+      ` | consecutive=${suspiciousWindowCount} → ${shortDensity >= JIGGLER_SHORT_DENSITY ? "SUSPICIOUS" : "ok"}`
+    );
 
-    const avgDist = comparePositionClouds(prev, curr);
-    if (avgDist < JIGGLER_DIST_THRESHOLD) {
+    if (shortDensity >= JIGGLER_SHORT_DENSITY) {
       suspiciousWindowCount++;
     } else {
       suspiciousWindowCount = 0;
@@ -93,9 +111,9 @@ function startJigglerDetector() {
       mainWindow?.webContents.send("suspicious-activity");
     }
 
-    // Trim memory: keep last 20 windows
-    if (mouseSamples.length > JIGGLER_WINDOW_SAMPLES * 20) {
-      mouseSamples = mouseSamples.slice(-JIGGLER_WINDOW_SAMPLES * 10);
+    // Trim memory: keep last 10-min long-window worth of samples
+    if (mouseSamples.length > LONG_WINDOW * 2) {
+      mouseSamples = mouseSamples.slice(-LONG_WINDOW);
     }
   }, JIGGLER_SAMPLE_MS);
 }
@@ -339,7 +357,12 @@ ipcMain.handle("patch-entry", async (_e, id: string, body: Record<string, unknow
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
-  const data = await res.json() as Record<string, unknown>;
+  // Safely parse response — server may return empty body on 500 errors
+  let data: Record<string, unknown> = {};
+  try {
+    const text = await res.text();
+    if (text.trim()) data = JSON.parse(text);
+  } catch { /* non-JSON response — leave data empty */ }
   if (!res.ok) throw new Error((data.error as string) || `HTTP ${res.status}`);
   return data;
 });
