@@ -82,6 +82,7 @@ function startJigglerDetector() {
       console.log(`[jiggler] long-window density=${longDensity.toFixed(3)} (threshold ${JIGGLER_LONG_DENSITY})`);
       if (longDensity >= JIGGLER_LONG_DENSITY) {
         suspiciousAlerted = true;
+        surfaceWindow();
         mainWindow?.webContents.send("suspicious-activity");
         return;
       }
@@ -108,6 +109,7 @@ function startJigglerDetector() {
 
     if (suspiciousWindowCount >= JIGGLER_SUSPICIOUS_WINS) {
       suspiciousAlerted = true;
+      surfaceWindow();
       mainWindow?.webContents.send("suspicious-activity");
     }
 
@@ -223,6 +225,23 @@ export function updateTrayMenu() {
   tray.setTitle(isTracking ? "●" : "");
 }
 
+// ── Bring window to foreground ─────────────────────────────────────────────────
+/**
+ * Surfaces the tracker window above all other apps so the VA sees the alert
+ * immediately, regardless of what they're doing on screen.
+ */
+function surfaceWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  // setAlwaysOnTop briefly puts it above full-screen apps, then releases the pin
+  mainWindow.setAlwaysOnTop(true, "floating");
+  mainWindow.focus();
+  app.focus({ steal: true });
+  // Release always-on-top after 8 s so it doesn't get in the way permanently
+  setTimeout(() => mainWindow?.setAlwaysOnTop(false), 8000);
+}
+
 // ── Idle monitoring ────────────────────────────────────────────────────────────
 let idleInterval: ReturnType<typeof setInterval> | null = null;
 let activeIdleThresholdMins = store.get("idleThresholdMins") as number;
@@ -236,6 +255,7 @@ function startIdleMonitor(idleThresholdMins?: number) {
     const thresholdSecs = activeIdleThresholdMins * 60;
     if (idleSecs >= thresholdSecs && !idleAlerted) {
       idleAlerted = true;
+      surfaceWindow();
       mainWindow?.webContents.send("idle-detected", { idleSecs });
     }
     // Send idle status to renderer every tick
