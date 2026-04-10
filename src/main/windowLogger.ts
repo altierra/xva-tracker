@@ -1,4 +1,4 @@
-import activeWin from "active-win";
+import { execSync } from "child_process";
 
 interface WindowEntry {
   app: string;
@@ -15,12 +15,43 @@ let _entryId: string = "";
 let _token: string = "";
 let _portalUrl: string = "";
 
+/**
+ * Get the active window using AppleScript — no Accessibility or Screen Recording
+ * permission needed for basic app name + window title on macOS.
+ * Falls back to "Unknown" gracefully if anything fails.
+ */
+function getActiveWindowMac(): { app: string; title: string; url: string | null } {
+  try {
+    const script = `
+      tell application "System Events"
+        set frontApp to first application process whose frontmost is true
+        set appName to name of frontApp
+        set winTitle to ""
+        try
+          set winTitle to name of front window of frontApp
+        end try
+        return appName & "|||" & winTitle
+      end tell
+    `;
+    const out = execSync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    const [app, title] = out.split("|||");
+    return { app: app?.trim() || "Unknown", title: title?.trim() || "", url: null };
+  } catch {
+    return { app: "Unknown", title: "", url: null };
+  }
+}
+
 async function pollWindow() {
   try {
-    const win = await activeWin();
-    const app = win?.owner?.name ?? "Unknown";
-    const title = win?.title ?? "";
-    const url = (win as { url?: string })?.url ?? null;
+    const { app, title, url } = process.platform === "darwin"
+      ? getActiveWindowMac()
+      : { app: "Unknown", title: "", url: null };
+
+    if (!app || app === "Unknown") return;
 
     if (!currentWindow) {
       currentWindow = { app, title, url, startedAt: new Date().toISOString() };
@@ -39,7 +70,7 @@ async function pollWindow() {
       currentWindow = { app, title, url, startedAt: new Date().toISOString() };
     }
   } catch {
-    // active-win may throw if permissions not granted
+    // fail silently
   }
 }
 

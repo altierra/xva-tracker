@@ -3,7 +3,6 @@ import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
 import { execSync } from "child_process";
-import activeWin from "active-win";
 import { startWindowLogger, stopWindowLogger, getActivitySummary, getWindowLog } from "./windowLogger";
 import { startScreenshotter, stopScreenshotter } from "./screenshotter";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
@@ -380,18 +379,15 @@ async function pollMeetingState(): Promise<void> {
     // Option C: microphone is live
     const micInUse = isMicrophoneInUse();
 
-    // Option B: active window belongs to a known meeting app or URL
+    // Option B: active window belongs to a known meeting app or URL (via AppleScript)
     let windowIsMeeting = false;
     try {
-      const win = await activeWin();
-      if (win) {
-        const title = (win.title ?? "").toLowerCase();
-        const appName = (win.owner?.name ?? "").toLowerCase();
-        windowIsMeeting =
-          MEETING_APP_NAMES.some(n => appName.includes(n)) ||
-          MEETING_TITLE_KEYWORDS.some(k => title.includes(k));
-      }
-    } catch { /* ignore if activeWin unavailable */ }
+      const out = execSync(
+        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
+        { encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"] }
+      ).trim().toLowerCase();
+      windowIsMeeting = MEETING_APP_NAMES.some(n => out.includes(n));
+    } catch { /* ignore */ }
 
     if (micInUse || windowIsMeeting) {
       lastMeetingSeenAt = Date.now();
