@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, shell, dialog, screen } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, powerMonitor, shell, dialog, screen, systemPreferences } from "electron";
 import { autoUpdater } from "electron-updater";
 import Store from "electron-store";
 import path from "path";
@@ -202,6 +202,18 @@ async function handleOffenseResult(type: "idle" | "jiggler", action: string) {
   }
 }
 
+// ── Accessibility permission (macOS) ──────────────────────────────────────────
+/**
+ * Returns whether accessibility permission is currently granted.
+ * We never call isTrustedAccessibilityClient(true) — that shows an OS-level
+ * dialog which can restart the app mid-session and reset tracking state.
+ * Instead the renderer shows a non-intrusive banner with a direct Settings link.
+ */
+function isAccessibilityGranted(): boolean {
+  if (process.platform !== "darwin") return true;
+  return systemPreferences.isTrustedAccessibilityClient(false);
+}
+
 // ── Single instance lock ───────────────────────────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -368,15 +380,21 @@ async function pollMeetingState(): Promise<void> {
     // Option C: microphone is live
     const micInUse = isMicrophoneInUse();
 
-    // Option B: active window belongs to a known meeting app or URL
+    // Option B: active window belongs to a known meeting app or URL.
+    // Guard with isTrustedAccessibilityClient(false) — never prompt here;
+    // prompting is only done once at startup via checkAccessibilityPermission().
     let windowIsMeeting = false;
-    const win = await activeWin();
-    if (win) {
-      const title = (win.title ?? "").toLowerCase();
-      const appName = (win.owner?.name ?? "").toLowerCase();
-      windowIsMeeting =
-        MEETING_APP_NAMES.some(n => appName.includes(n)) ||
-        MEETING_TITLE_KEYWORDS.some(k => title.includes(k));
+    const canUseActiveWin = process.platform !== "darwin" ||
+      systemPreferences.isTrustedAccessibilityClient(false);
+    if (canUseActiveWin) {
+      const win = await activeWin();
+      if (win) {
+        const title = (win.title ?? "").toLowerCase();
+        const appName = (win.owner?.name ?? "").toLowerCase();
+        windowIsMeeting =
+          MEETING_APP_NAMES.some(n => appName.includes(n)) ||
+          MEETING_TITLE_KEYWORDS.some(k => title.includes(k));
+      }
     }
 
     if (micInUse || windowIsMeeting) {
@@ -535,6 +553,8 @@ ipcMain.handle("check-suspension", async () => {
   }
 });
 
+ipcMain.handle("get-accessibility-granted", () => isAccessibilityGranted());
+
 ipcMain.handle("get-tracking-state", () => ({
   isTracking,
   currentEntryId,
@@ -632,6 +652,8 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   console.log("[main] IPC handlers registered");
+
+  // Accessibility is checked via IPC — renderer shows a non-intrusive banner
 
   if (process.env.NODE_ENV !== "development") {
     autoUpdater.checkForUpdatesAndNotify();

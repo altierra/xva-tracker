@@ -69,6 +69,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const [newPortalUrl, setNewPortalUrl] = useState("");
   const [activityLog, setActivityLog] = useState<AppUsage[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+  const [accessibilityGranted, setAccessibilityGranted] = useState(true);
 
   // Rotating word list for jiggler verification
   const VERIFY_WORDS = ["apple", "mango", "table", "cloud", "river", "tiger", "piano", "storm", "grain", "forge"];
@@ -119,6 +120,20 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       pauseOffsetRef.current += Date.now() - manualPauseStartRef.current;
       manualPauseStartRef.current = null;
     }
+  }, []);
+
+  // ─── Accessibility permission check (macOS) ──────────────────────────────
+  useEffect(() => {
+    window.xvaApi.getAccessibilityGranted?.().then(granted => {
+      setAccessibilityGranted(!!granted);
+    });
+    // Re-check every 30s so the banner dismisses automatically once the user grants it
+    const interval = setInterval(() => {
+      window.xvaApi.getAccessibilityGranted?.().then(granted => {
+        setAccessibilityGranted(!!granted);
+      });
+    }, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   // ─── Restore running entry on load ───────────────────────────────────────
@@ -293,6 +308,11 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       if (suspStatus?.suspended) {
         setIsSuspended(true);
         setSuspendedReason(suspStatus.reason ?? null);
+        setLoading(false);
+        return;
+      }
+      if (suspStatus?.dayClosedToday) {
+        setDayClosedReason((suspStatus.dayClosedReason as "idle" | "jiggler") ?? "jiggler");
         setLoading(false);
         return;
       }
@@ -497,6 +517,32 @@ export function TrackerScreen({ config, onRefresh }: Props) {
           <button onClick={() => setShowSettings(true)} style={styles.iconBtn} title="Settings">⚙</button>
         </div>
       </div>
+
+      {/* ── Accessibility permission banner ──────────────────────────────── */}
+      {!accessibilityGranted && (
+        <div style={{
+          background: "rgba(245,158,11,0.1)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          borderRadius: 8,
+          padding: "8px 12px",
+          margin: "8px 0 0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 11, color: "#fbbf24", lineHeight: 1.4 }}>
+            ⚠️ <strong>App tracking disabled.</strong> Grant Accessibility access to record which apps you use.
+            After granting, toggle it off and back on in Settings to activate.
+          </span>
+          <button
+            onClick={() => window.xvaApi.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")}
+            style={{ fontSize: 10, padding: "3px 8px", background: "rgba(245,158,11,0.2)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            Open Settings
+          </button>
+        </div>
+      )}
 
       {/* ── Suspended overlay — blocks entire UI ─────────────────────────── */}
       {isSuspended && (

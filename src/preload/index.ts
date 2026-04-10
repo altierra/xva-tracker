@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld("xvaApi", {
   // External links
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
 
+  // Accessibility permission status (macOS) — renderer uses this to show a banner
+  getAccessibilityGranted: () => ipcRenderer.invoke("get-accessibility-granted"),
+
   // Events from main → renderer
   onIdleDetected: (cb: (payload: { idleSecs: number; offense?: number; closeDay?: boolean }) => void) => {
     ipcRenderer.on("idle-detected", (_e, payload) => cb(payload));
