@@ -255,9 +255,11 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       setSuspendedReason(reason);
     });
 
-    // Force-stop: finalize the current entry (main already stopped tracking)
+    // Force-stop: finalize the current entry (main already stopped tracking).
+    // Use stopTimerRef.current() — stopTimer itself is a stale closure here
+    // since this effect runs once with [] deps.
     const unsubForceStop = window.xvaApi.onForceStop(() => {
-      stopTimer(); // save entry to portal
+      stopTimerRef.current();
     });
 
     return () => { unsub(); unsubDayClosed(); unsubSuspended(); unsubForceStop(); };
