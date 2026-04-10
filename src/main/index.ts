@@ -380,13 +380,9 @@ async function pollMeetingState(): Promise<void> {
     // Option C: microphone is live
     const micInUse = isMicrophoneInUse();
 
-    // Option B: active window belongs to a known meeting app or URL.
-    // Guard with isTrustedAccessibilityClient(false) — never prompt here;
-    // prompting is only done once at startup via checkAccessibilityPermission().
+    // Option B: active window belongs to a known meeting app or URL
     let windowIsMeeting = false;
-    const canUseActiveWin = process.platform !== "darwin" ||
-      systemPreferences.isTrustedAccessibilityClient(false);
-    if (canUseActiveWin) {
+    try {
       const win = await activeWin();
       if (win) {
         const title = (win.title ?? "").toLowerCase();
@@ -395,7 +391,7 @@ async function pollMeetingState(): Promise<void> {
           MEETING_APP_NAMES.some(n => appName.includes(n)) ||
           MEETING_TITLE_KEYWORDS.some(k => title.includes(k));
       }
-    }
+    } catch { /* ignore if activeWin unavailable */ }
 
     if (micInUse || windowIsMeeting) {
       lastMeetingSeenAt = Date.now();
