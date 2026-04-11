@@ -539,10 +539,17 @@ ipcMain.handle("check-suspension", async () => {
     const res = await fetch(`${portalUrl}/api/timetracker/suspension-status`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return { suspended: false };
-    return await res.json();
+    if (!res.ok) {
+      // Server error — return cached status so a day-closed state persists across restarts
+      return store.get("lastSuspensionStatus") ?? { suspended: false };
+    }
+    const data = await res.json();
+    // Cache so network failures stay fail-closed
+    store.set("lastSuspensionStatus", data);
+    return data;
   } catch {
-    return { suspended: false };
+    // Network error — return cached status (fail-closed: if day was closed, stay closed)
+    return store.get("lastSuspensionStatus") ?? { suspended: false };
   }
 });
 
@@ -584,6 +591,9 @@ ipcMain.handle("create-entry", async (_e, body: Record<string, unknown>) => {
     body: JSON.stringify(body),
   });
   const data = await res.json() as Record<string, unknown>;
+  // Return 403 compliance errors to the renderer as data (not thrown) so it can
+  // update state correctly for day_closed and suspended cases.
+  if (res.status === 403) return data;
   if (!res.ok) throw new Error((data.error as string) || `HTTP ${res.status}`);
   return data;
 });

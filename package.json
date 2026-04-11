@@ -1,6 +1,6 @@
 {
   "name": "xva-tracker",
-  "version": "1.0.43",
+  "version": "1.0.44",
   "description": "XVA Tracker — Desktop time tracking agent for Altierra VAs",
   "main": "dist/main/index.js",
   "scripts": {

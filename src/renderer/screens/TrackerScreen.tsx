@@ -122,6 +122,21 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     }
   }, []);
 
+  // ─── Suspension / day-closed check on mount ──────────────────────────────
+  // Run immediately so the correct state is shown without waiting for Start click.
+  useEffect(() => {
+    window.xvaApi.checkSuspension().then((status) => {
+      if (!status) return;
+      if (status.suspended) {
+        setIsSuspended(true);
+        setSuspendedReason(status.reason ?? null);
+      } else if (status.dayClosedToday) {
+        setDayClosedReason((status.dayClosedReason as "idle" | "jiggler") ?? "jiggler");
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Screen Recording permission check (macOS) ───────────────────────────
   useEffect(() => {
     const check = () => {
@@ -300,10 +315,15 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // ─── Actions ──────────────────────────────────────────────────────────────
   const startTimer = async () => {
     if (!description.trim()) { setError("Please enter a description before starting."); return; }
+
+    // Early exit if already in a blocked state — no API call needed
+    if (dayClosedReason) return;
+    if (isSuspended) return;
+
     setLoading(true);
     setError("");
     try {
-      // Check if the VA is suspended before starting
+      // Re-confirm with server before proceeding
       const suspStatus = await window.xvaApi.checkSuspension();
       if (suspStatus?.suspended) {
         setIsSuspended(true);
@@ -327,7 +347,6 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       usageAtStartRef.current = null;
       limitTriggeredRef.current = false;
       setIsSuspicious(false);
-      setDayClosedReason(null);
       setIdleOffenseCount(0);
       setJigglerOffenseCount(0);
 
@@ -338,6 +357,19 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         weekStart: getWeekStart(now).toISOString(),
         isRunning: true,
       });
+
+      // Server-side gate returned 403 — entry creation rejected
+      if (data?.error === "day_closed") {
+        setDayClosedReason("jiggler"); // reason detail unavailable from 403 body
+        setLoading(false);
+        return;
+      }
+      if (data?.error === "suspended") {
+        setIsSuspended(true);
+        setLoading(false);
+        return;
+      }
+
       const entry = data.entry ?? data;
       const entryId = entry.id as string;
       setCurrentEntryId(entryId);
@@ -682,13 +714,13 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         <div style={styles.field}>
           <label style={styles.fieldLabel}>What are you working on?</label>
           <input
-            style={{ ...styles.input, opacity: isTracking ? 0.7 : 1, cursor: isTracking ? "not-allowed" : "text" }}
+            style={{ ...styles.input, opacity: (isTracking || !!dayClosedReason || isSuspended) ? 0.7 : 1, cursor: (isTracking || !!dayClosedReason || isSuspended) ? "not-allowed" : "text" }}
             type="text"
             value={description}
-            onChange={e => !isTracking && setDescription(e.target.value)}
+            onChange={e => !isTracking && !dayClosedReason && !isSuspended && setDescription(e.target.value)}
             placeholder="e.g. Scheduling client meetings"
-            disabled={isTracking}
-            onKeyDown={e => { if (e.key === "Enter" && !isTracking) startTimer(); }}
+            disabled={isTracking || !!dayClosedReason || isSuspended}
+            onKeyDown={e => { if (e.key === "Enter" && !isTracking && !dayClosedReason && !isSuspended) startTimer(); }}
           />
         </div>
 
@@ -696,10 +728,10 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         <div style={styles.field}>
           <label style={styles.fieldLabel}>Project</label>
           <select
-            style={{ ...styles.input, opacity: isTracking ? 0.7 : 1, cursor: isTracking ? "not-allowed" : "pointer" }}
+            style={{ ...styles.input, opacity: (isTracking || !!dayClosedReason || isSuspended) ? 0.7 : 1, cursor: (isTracking || !!dayClosedReason || isSuspended) ? "not-allowed" : "pointer" }}
             value={selectedProjectId}
-            onChange={e => !isTracking && setSelectedProjectId(e.target.value)}
-            disabled={isTracking}
+            onChange={e => !isTracking && !dayClosedReason && !isSuspended && setSelectedProjectId(e.target.value)}
+            disabled={isTracking || !!dayClosedReason || isSuspended}
           >
             <option value="">— No project —</option>
             {config.projects.map(p => (
@@ -748,10 +780,10 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         ) : (
           <button
             onClick={startTimer}
-            disabled={loading}
-            style={{ ...styles.mainBtn, background: "#1855F5", opacity: loading ? 0.6 : 1 }}
+            disabled={loading || !!dayClosedReason || isSuspended}
+            style={{ ...styles.mainBtn, background: (dayClosedReason || isSuspended) ? "#374151" : "#1855F5", opacity: (loading || !!dayClosedReason || isSuspended) ? 0.5 : 1, cursor: (dayClosedReason || isSuspended) ? "not-allowed" : "pointer" }}
           >
-            {loading ? "…" : "▶  Start Timer"}
+            {loading ? "…" : (dayClosedReason || isSuspended) ? "Tracking Locked" : "▶  Start Timer"}
           </button>
         )}
 
