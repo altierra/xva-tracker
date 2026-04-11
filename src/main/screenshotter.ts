@@ -1,6 +1,6 @@
-import { desktopCapturer, systemPreferences, shell } from "electron";
+import { desktopCapturer, shell } from "electron";
 import { execSync } from "child_process";
-import { readFileSync, unlinkSync, existsSync } from "fs";
+import { readFileSync, unlinkSync, existsSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -10,13 +10,28 @@ let _token = "";
 let _portalUrl = "";
 
 /**
- * Check if Screen Recording permission is granted on macOS.
- * Unlike Accessibility, getMediaAccessStatus is reliable for screen recording.
+ * Check if Screen Recording permission is actually working by doing a real probe capture.
+ * systemPreferences.getMediaAccessStatus("screen") is unreliable with ad-hoc signed apps
+ * (same issue as isTrustedAccessibilityClient) — it returns "not-determined" even when
+ * the toggle is enabled. Instead we do a live test capture with screencapture CLI.
  */
 export function isScreenRecordingGranted(): boolean {
   if (process.platform !== "darwin") return true;
-  const status = systemPreferences.getMediaAccessStatus("screen");
-  return status === "granted";
+  const tmpFile = join(tmpdir(), `xva_probe_${Date.now()}.jpg`);
+  try {
+    execSync(`screencapture -x -t jpg -m "${tmpFile}"`, {
+      timeout: 3000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (existsSync(tmpFile)) {
+      const size = statSync(tmpFile).size;
+      try { unlinkSync(tmpFile); } catch { /* ignore */ }
+      return size > 1000; // a real screenshot is always >1KB; permission-denied gives empty/tiny file
+    }
+  } catch {
+    try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ignore */ }
+  }
+  return false;
 }
 
 /**
