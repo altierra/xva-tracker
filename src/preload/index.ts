@@ -49,6 +49,10 @@ contextBridge.exposeInMainWorld("xvaApi", {
   // Accessibility permission status (macOS) — renderer uses this to show a banner
   getAccessibilityGranted: () => ipcRenderer.invoke("get-accessibility-granted"),
 
+  // Screen Recording permission (macOS) — required for screenshots
+  getScreenRecordingGranted: () => ipcRenderer.invoke("get-screen-recording-granted"),
+  openScreenRecordingSettings: () => ipcRenderer.invoke("open-screen-recording-settings"),
+
   // Events from main → renderer
   onIdleDetected: (cb: (payload: { idleSecs: number; offense?: number; closeDay?: boolean }) => void) => {
     ipcRenderer.on("idle-detected", (_e, payload) => cb(payload));

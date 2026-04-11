@@ -69,6 +69,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const [newPortalUrl, setNewPortalUrl] = useState("");
   const [activityLog, setActivityLog] = useState<AppUsage[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+  const [screenRecordingGranted, setScreenRecordingGranted] = useState(true);
 
   // Rotating word list for jiggler verification
   const VERIFY_WORDS = ["apple", "mango", "table", "cloud", "river", "tiger", "piano", "storm", "grain", "forge"];
@@ -119,6 +120,18 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       pauseOffsetRef.current += Date.now() - manualPauseStartRef.current;
       manualPauseStartRef.current = null;
     }
+  }, []);
+
+  // ─── Screen Recording permission check (macOS) ───────────────────────────
+  useEffect(() => {
+    const check = () => {
+      window.xvaApi.getScreenRecordingGranted?.().then(granted => {
+        setScreenRecordingGranted(!!granted);
+      });
+    };
+    check();
+    const interval = setInterval(check, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   // ─── Restore running entry on load ───────────────────────────────────────
@@ -504,6 +517,31 @@ export function TrackerScreen({ config, onRefresh }: Props) {
           <button onClick={() => setShowSettings(true)} style={styles.iconBtn} title="Settings">⚙</button>
         </div>
       </div>
+
+      {/* ── Screen Recording permission banner ───────────────────────────── */}
+      {!screenRecordingGranted && (
+        <div style={{
+          background: "rgba(245,158,11,0.1)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          borderRadius: 8,
+          padding: "8px 12px",
+          margin: "8px 0 0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 11, color: "#fbbf24", lineHeight: 1.4 }}>
+            📷 <strong>Screenshots disabled.</strong> Grant Screen Recording access so the system can capture periodic screenshots.
+          </span>
+          <button
+            onClick={() => window.xvaApi.openScreenRecordingSettings?.()}
+            style={{ fontSize: 10, padding: "3px 8px", background: "rgba(245,158,11,0.2)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            Open Settings
+          </button>
+        </div>
+      )}
 
       {/* ── Suspended overlay — blocks entire UI ─────────────────────────── */}
       {isSuspended && (
