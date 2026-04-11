@@ -244,20 +244,20 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       });
     });
 
-    // Day closed by compliance (2nd offense)
+    // Day closed by compliance (2nd offense) — stop timer AND show banner
     const unsubDayClosed = window.xvaApi.onDayClosed(({ reason }) => {
       setDayClosedReason(reason);
+      stopTimerRef.current(); // ensure timer stops immediately
     });
 
-    // Indefinitely suspended
+    // Indefinitely suspended — stop timer AND show overlay
     const unsubSuspended = window.xvaApi.onTrackerSuspended(({ reason }) => {
       setIsSuspended(true);
       setSuspendedReason(reason);
+      stopTimerRef.current(); // ensure timer stops immediately
     });
 
-    // Force-stop: finalize the current entry (main already stopped tracking).
-    // Use stopTimerRef.current() — stopTimer itself is a stale closure here
-    // since this effect runs once with [] deps.
+    // Force-stop: belt-and-suspenders in case day-closed fires before stopTimerRef is ready
     const unsubForceStop = window.xvaApi.onForceStop(() => {
       stopTimerRef.current();
     });
