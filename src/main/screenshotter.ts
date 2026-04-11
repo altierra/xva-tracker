@@ -1,8 +1,4 @@
 import { desktopCapturer, shell } from "electron";
-import { execSync } from "child_process";
-import { readFileSync, unlinkSync, existsSync, statSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
 
 let screenshotInterval: ReturnType<typeof setInterval> | null = null;
 let _entryId = "";
@@ -10,27 +6,27 @@ let _token = "";
 let _portalUrl = "";
 
 /**
- * Check if Screen Recording permission is actually working by doing a real probe capture.
- * systemPreferences.getMediaAccessStatus("screen") is unreliable with ad-hoc signed apps
- * (same issue as isTrustedAccessibilityClient) — it returns "not-determined" even when
- * the toggle is enabled. Instead we do a live test capture with screencapture CLI.
+ * Probe whether Screen Recording is actually working by attempting a real capture
+ * via desktopCapturer (Electron main process). This is the only reliable method
+ * with ad-hoc signed apps because:
+ *  - systemPreferences.getMediaAccessStatus("screen") always returns "not-determined"
+ *  - screencapture CLI subprocess has its own TCC entry and doesn't inherit the app's permission
+ *  - desktopCapturer runs in-process and correctly gets the granted permission
+ *
+ * Returns true if a non-black thumbnail was obtained (i.e., permission is working).
  */
-export function isScreenRecordingGranted(): boolean {
+export async function probeScreenRecordingGranted(): Promise<boolean> {
   if (process.platform !== "darwin") return true;
-  const tmpFile = join(tmpdir(), `xva_probe_${Date.now()}.jpg`);
   try {
-    execSync(`screencapture -x -t jpg -m "${tmpFile}"`, {
-      timeout: 3000,
-      stdio: ["pipe", "pipe", "pipe"],
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 320, height: 180 },
     });
-    if (existsSync(tmpFile)) {
-      const size = statSync(tmpFile).size;
-      try { unlinkSync(tmpFile); } catch { /* ignore */ }
-      return size > 1000; // a real screenshot is always >1KB; permission-denied gives empty/tiny file
+    if (sources.length > 0) {
+      const jpeg = sources[0].thumbnail.toJPEG(75);
+      return jpeg.length > 500; // real screen content is always >500B at 320×180
     }
-  } catch {
-    try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ignore */ }
-  }
+  } catch { /* permission denied or unavailable */ }
   return false;
 }
 
@@ -42,12 +38,9 @@ export function openScreenRecordingSettings() {
 }
 
 /**
- * Try desktopCapturer first (works when Screen Recording is granted).
- * Falls back to screencapture CLI which also needs Screen Recording but
- * triggers the macOS permission prompt if not yet determined.
+ * Capture the screen via desktopCapturer (requires Screen Recording permission).
  */
 async function captureScreenBase64(): Promise<string | null> {
-  // Method 1: desktopCapturer (Electron native)
   try {
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
@@ -55,32 +48,11 @@ async function captureScreenBase64(): Promise<string | null> {
     });
     if (sources.length > 0) {
       const jpeg = sources[0].thumbnail.toJPEG(75);
-      if (jpeg.length > 1000) { // non-empty image
+      if (jpeg.length > 1000) {
         return "data:image/jpeg;base64," + jpeg.toString("base64");
       }
     }
-  } catch { /* fall through to CLI */ }
-
-  // Method 2: screencapture CLI fallback
-  if (process.platform === "darwin") {
-    const tmpFile = join(tmpdir(), `xva_ss_${Date.now()}.jpg`);
-    try {
-      execSync(`screencapture -x -t jpg -m "${tmpFile}"`, {
-        timeout: 8000,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      if (existsSync(tmpFile)) {
-        const buf = readFileSync(tmpFile);
-        unlinkSync(tmpFile);
-        if (buf.length > 1000) {
-          return "data:image/jpeg;base64," + buf.toString("base64");
-        }
-      }
-    } catch {
-      if (existsSync(tmpFile)) { try { unlinkSync(tmpFile); } catch { /* ignore */ } }
-    }
-  }
-
+  } catch { /* permission denied */ }
   return null;
 }
 

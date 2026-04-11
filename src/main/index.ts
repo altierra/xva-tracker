@@ -4,7 +4,7 @@ import Store from "electron-store";
 import path from "path";
 import { execSync } from "child_process";
 import { startWindowLogger, stopWindowLogger, getActivitySummary, getWindowLog } from "./windowLogger";
-import { isScreenRecordingGranted, openScreenRecordingSettings } from "./screenshotter";
+import { probeScreenRecordingGranted, openScreenRecordingSettings } from "./screenshotter";
 import { startScreenshotter, stopScreenshotter } from "./screenshotter";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 
@@ -547,7 +547,7 @@ ipcMain.handle("check-suspension", async () => {
 });
 
 ipcMain.handle("get-accessibility-granted", () => isAccessibilityGranted());
-ipcMain.handle("get-screen-recording-granted", () => isScreenRecordingGranted());
+ipcMain.handle("get-screen-recording-granted", async () => probeScreenRecordingGranted());
 ipcMain.handle("open-screen-recording-settings", () => openScreenRecordingSettings());
 
 ipcMain.handle("get-tracking-state", () => ({
