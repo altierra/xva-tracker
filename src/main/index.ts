@@ -662,6 +662,12 @@ ipcMain.handle("install-update", () => {
   autoUpdater.quitAndInstall();
 });
 
+// Quit the app from the renderer (e.g. "Acknowledged" button on day-closed banner)
+ipcMain.handle("quit-app", () => {
+  isQuitting = true;
+  app.quit();
+});
+
 // ── Auto-updater ───────────────────────────────────────────────────────────────
 autoUpdater.on("update-downloaded", () => {
   // Notify renderer — banner appears so VA can choose when to restart

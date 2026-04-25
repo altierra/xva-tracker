@@ -65,6 +65,7 @@ export interface XvaApi {
   onDayClosed: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => () => void;
   onTrackerSuspended: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => () => void;
   onForceStop: (cb: () => void) => () => void;
+  quitApp: () => Promise<void>;
   reportOffense: (type: "idle" | "jiggler") => Promise<string>;
   checkSuspension: () => Promise<{ suspended: boolean; reason?: string; dayClosedToday?: boolean; dayClosedReason?: string } | null>;
   getAccessibilityGranted: () => Promise<boolean>;

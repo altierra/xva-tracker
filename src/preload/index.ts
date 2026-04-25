@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("xvaApi", {
 
   // Updates
   installUpdate: () => ipcRenderer.invoke("install-update"),
+  quitApp: () => ipcRenderer.invoke("quit-app"),
 
   // Suspicious activity
   resumeFromSuspicious: () => ipcRenderer.invoke("resume-from-suspicious"),

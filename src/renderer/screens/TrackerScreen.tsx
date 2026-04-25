@@ -724,10 +724,27 @@ export function TrackerScreen({ config, onRefresh }: Props) {
               ? "Suspicious mouse movement was detected twice in this session."
               : "Idle time was detected twice in this session."}
           </p>
-          <p style={{ fontSize: 11, color: "#94a3b8", margin: 0, lineHeight: 1.4 }}>
+          <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 12px", lineHeight: 1.4 }}>
             A formal warning letter has been sent to your email. Tracking will resume tomorrow.
             A further violation on another day will result in an indefinite suspension.
           </p>
+          <button
+            onClick={() => window.xvaApi.quitApp()}
+            style={{
+              width: "100%",
+              padding: "8px 0",
+              borderRadius: 8,
+              border: "1px solid rgba(239,68,68,0.4)",
+              background: "rgba(239,68,68,0.15)",
+              color: "#f87171",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              letterSpacing: "0.02em",
+            }}
+          >
+            Understood — Close App
+          </button>
         </div>
       )}
 
@@ -855,9 +872,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         {/* Project badges */}
         {selectedProject && (
           <div style={styles.badges}>
-            {selectedProject.screenshotEnabled && (
-              <span style={styles.badge}>📸 Screenshots every {selectedProject.screenshotIntervalMins}m</span>
-            )}
+
             {selectedProject.dailyLimitMins && (
               <span style={styles.badge}>⏱ {selectedProject.dailyLimitMins / 60}h daily limit</span>
             )}

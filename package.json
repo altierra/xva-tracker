@@ -1,6 +1,6 @@
 {
   "name": "xva-tracker",
-  "version": "1.0.52",
+  "version": "1.0.54",
   "description": "XVA Tracker — Desktop time tracking agent for Altierra VAs",
   "main": "dist/main/index.js",
   "scripts": {
@@ -52,8 +52,18 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "dmg", "arch": ["x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "identity": null,
       "hardenedRuntime": false,
@@ -61,7 +71,12 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "XVA-Tracker-Setup-${arch}.${ext}"
     },
