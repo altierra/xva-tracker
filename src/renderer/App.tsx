@@ -1,9 +1,35 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Component } from "react";
 import type { AgentConfig, Project, RunningEntry } from "./types";
 import { SetupScreen } from "./screens/SetupScreen";
 import { TrackerScreen } from "./screens/TrackerScreen";
 
 type Screen = "loading" | "setup" | "tracker";
+
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0d0f14", padding: 24, textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>⚠️</div>
+          <p style={{ color: "#f87171", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Something went wrong</p>
+          <p style={{ color: "#64748b", fontSize: 11, marginBottom: 16, maxWidth: 260 }}>{this.state.error.message}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            style={{ padding: "8px 16px", background: "#1855F5", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
@@ -51,7 +77,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <ErrorBoundary>
       {updateAvailable && (
         <div style={styles.updateBanner}>
           <span style={{ marginRight: 8 }}>🎉 A new version of XVA Tracker is ready to install.</span>
@@ -59,7 +85,7 @@ export default function App() {
         </div>
       )}
       <TrackerScreen config={config!} onRefresh={loadConfig} />
-    </>
+    </ErrorBoundary>
   );
 }
 

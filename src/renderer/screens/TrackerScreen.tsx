@@ -33,16 +33,23 @@ function getActivityColor(score: number): string {
 
 export function TrackerScreen({ config, onRefresh }: Props) {
   const [isTracking, setIsTracking] = useState(false);
-  const [currentEntryId, setCurrentEntryId] = useState<string | null>(config.runningEntry?.id ?? null);
-  const [description, setDescription] = useState(config.runningEntry?.description ?? "");
+  // Treat a running entry from a previous calendar day as stale — don't resume it
+  const _todayMidnight = new Date(); _todayMidnight.setHours(0, 0, 0, 0);
+  const _runningEntryIsStale = config.runningEntry
+    ? new Date(config.runningEntry.startTime) < _todayMidnight
+    : false;
+  const _freshEntry = _runningEntryIsStale ? null : config.runningEntry;
+
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(_freshEntry?.id ?? null);
+  const [description, setDescription] = useState(_freshEntry?.description ?? "");
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
-    config.runningEntry?.project
-      ? (config.projects.find(p => p.name === config.runningEntry!.project!.name)?.id ?? "")
+    _freshEntry?.project
+      ? (config.projects.find(p => p.name === _freshEntry!.project!.name)?.id ?? "")
       : ""
   );
   const [elapsed, setElapsed] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(
-    config.runningEntry ? new Date(config.runningEntry.startTime) : null
+    _freshEntry ? new Date(_freshEntry.startTime) : null
   );
   const [isIdle, setIsIdle] = useState(false);
   const [idleSecs, setIdleSecs] = useState(0);
@@ -81,6 +88,8 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   const manualPauseStartRef = useRef<number | null>(null); // epoch ms when manual pause began
   // Mirror elapsed in a ref so idle useEffect doesn't re-run every second
   const elapsedRef = useRef<number>(0);
+  // Mirror startTime in a ref so the idle listener can cap back-dating
+  const startTimeRef = useRef<Date | null>(_freshEntry ? new Date(_freshEntry.startTime) : null);
   // Collect idle periods to send to portal on stop
   const idlePeriodsRef = useRef<{ start: string; end: string; durationSecs: number }[]>([]);
 
@@ -92,7 +101,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // Keep stopTimer ref fresh so the timer interval can call it
   const stopTimerRef = useRef<(overrideErrorMsg?: string) => Promise<void>>(() => Promise.resolve());
   // Mirror currentEntryId in a ref so stopTimer always sees the live value even in stale closures
-  const currentEntryIdRef = useRef<string | null>(config.runningEntry?.id ?? null);
+  const currentEntryIdRef = useRef<string | null>(_freshEntry?.id ?? null);
 
   // Total paused ms right now (both sources combined)
   const totalPausedMs = useCallback(() => {
@@ -154,10 +163,31 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // ─── Restore running entry on load ───────────────────────────────────────
   useEffect(() => {
     if (config.runningEntry) {
-      setIsTracking(true);
-      setCurrentEntryId(config.runningEntry.id);
-      const proj = config.projects.find(p => p.name === config.runningEntry!.project?.name);
-      if (proj) setSelectedProjectId(proj.id);
+      const entryStart = new Date(config.runningEntry.startTime);
+      const todayMidnight = new Date();
+      todayMidnight.setHours(0, 0, 0, 0);
+
+      if (entryStart < todayMidnight) {
+        // Entry started on a previous day — close it out silently so the VA
+        // doesn't inherit phantom hours from a session that crashed without stopping.
+        window.xvaApi.patchEntry(config.runningEntry.id, {
+          isRunning: false,
+          endTime: todayMidnight.toISOString(),
+          duration: Math.floor((todayMidnight.getTime() - entryStart.getTime()) / 1000),
+          activityScore: 0,
+        }).catch(() => {});
+        // Clear state so the app starts fresh
+        setCurrentEntryId(null);
+        setStartTime(null);
+        setDescription("");
+        setSelectedProjectId("");
+        currentEntryIdRef.current = null;
+      } else {
+        setIsTracking(true);
+        setCurrentEntryId(config.runningEntry.id);
+        const proj = config.projects.find(p => p.name === config.runningEntry!.project?.name);
+        if (proj) setSelectedProjectId(proj.id);
+      }
     }
     window.xvaApi.getPortalUrl().then(url => {
       setPortalUrl(url);
@@ -196,7 +226,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
             limitTriggeredRef.current = true;
             const msg = `${type.charAt(0).toUpperCase() + type.slice(1)} limit reached — timer stopped automatically.`;
             console.log(`[limit] ${type} limit hit. entryIdRef=${currentEntryIdRef.current}`);
-            stopTimerRef.current(msg);
+            stopTimerRef.current(msg).catch(err => console.error("[limit-stop]", err));
             break;
           }
         }
@@ -219,8 +249,12 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       if (offense) setIdleOffenseCount(offense);
       // Only start idle pause if not already idle-paused
       if (idlePauseStartRef.current === null) {
-        // Back-date pause start to when idle actually began
-        idlePauseStartRef.current = Date.now() - s * 1000;
+        // Back-date pause start to when idle actually began, but never before
+        // the tracker started — otherwise the offset can exceed elapsed time
+        // and net time snaps to 0 after resume.
+        const backDated = Date.now() - s * 1000;
+        const trackerStart = startTimeRef.current?.getTime() ?? backDated;
+        idlePauseStartRef.current = Math.max(backDated, trackerStart);
       }
     });
 
@@ -277,19 +311,19 @@ export function TrackerScreen({ config, onRefresh }: Props) {
     // Day closed by compliance (2nd offense) — stop timer AND show banner
     const unsubDayClosed = window.xvaApi.onDayClosed(({ reason }) => {
       setDayClosedReason(reason);
-      stopTimerRef.current(); // ensure timer stops immediately
+      stopTimerRef.current().catch(err => console.error("[day-closed stop]", err));
     });
 
     // Indefinitely suspended — stop timer AND show overlay
     const unsubSuspended = window.xvaApi.onTrackerSuspended(({ reason }) => {
       setIsSuspended(true);
       setSuspendedReason(reason);
-      stopTimerRef.current(); // ensure timer stops immediately
+      stopTimerRef.current().catch(err => console.error("[suspended stop]", err));
     });
 
     // Force-stop: belt-and-suspenders in case day-closed fires before stopTimerRef is ready
     const unsubForceStop = window.xvaApi.onForceStop(() => {
-      stopTimerRef.current();
+      stopTimerRef.current().catch(err => console.error("[force-stop]", err));
     });
 
     // Sleep auto-pause: transparently exclude sleep time from tracked time.
@@ -335,6 +369,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
   // Sync refs now that derived values are computed
   useEffect(() => { selectedProjectRef.current = selectedProject; }, [selectedProject]);
   useEffect(() => { currentEntryIdRef.current = currentEntryId; }, [currentEntryId]);
+  useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   const startTimer = async () => {
@@ -471,10 +506,9 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       // Kill the timer interval immediately — don't wait for React re-render cycle
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
 
-      // Reset UI state first so the timer stops and buttons update regardless of portal sync
+      // Reset all React state. React 18 batches these into one render.
       setIsTracking(false);
       setCurrentEntryId(null);
-      currentEntryIdRef.current = null;
       setStartTime(null);
       setIsIdle(false);
       setIsManuallyPaused(false);
@@ -483,6 +517,14 @@ export function TrackerScreen({ config, onRefresh }: Props) {
       setActivityLog([]);
       setShowActivity(false);
       setDescription("");
+      setSelectedProjectId("");
+
+      currentEntryIdRef.current = null;
+
+      // Yield one macrotask so React can commit the stopped UI to the DOM
+      // before any async IPC calls begin. This is the safe alternative to
+      // flushSync (which throws when called inside a React event handler).
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
       pauseOffsetRef.current = 0;
       idlePauseStartRef.current = null;
       manualPauseStartRef.current = null;
@@ -495,31 +537,39 @@ export function TrackerScreen({ config, onRefresh }: Props) {
         return;
       }
 
-      // Fetch full window log before stopping (3 s timeout so it never stalls us)
+      // Stop local tracking first — this flushes the final window entry into the log.
+      // IMPORTANT: attach .catch() to the inner promise before racing so that if
+      // stopTracking() eventually rejects after the 5-second timeout already won,
+      // that trailing rejection is handled and doesn't crash the renderer.
+      try {
+        await Promise.race([
+          window.xvaApi.stopTracking().catch(() => {}),
+          new Promise<void>(r => setTimeout(r, 5000)),
+        ]);
+      } catch { /* no-op */ }
+
+      // Fetch the complete window log (including the final entry flushed by stopTracking).
+      // IMPORTANT: use a resolving timeout (not rejecting). A rejecting Promise inside
+      // Promise.race becomes an unhandled rejection once the race resolves, crashing
+      // the renderer process. Resolve with [] on timeout instead.
       let windowLog: unknown[] = [];
       try {
         windowLog = await Promise.race([
           window.xvaApi.getWindowLog(),
-          new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 3000)),
-        ]);
-      } catch { /* no-op */ }
-
-      // Stop local tracking — 5 s timeout so a hung IPC call never blocks us
-      try {
-        await Promise.race([
-          window.xvaApi.stopTracking(),
-          new Promise<void>(r => setTimeout(r, 5000)),
+          new Promise<unknown[]>(resolve => setTimeout(() => resolve([]), 3000)),
         ]);
       } catch { /* no-op */ }
 
       // Sync with portal — show error if it fails but don't block the user
       try {
+        // Cap window log at 500 entries to avoid IPC serialization issues on long sessions
+        const trimmedLog = windowLog.length > 500 ? windowLog.slice(-500) : windowLog;
         await window.xvaApi.patchEntry(entryId, {
           isRunning: false,
           endTime: new Date().toISOString(),
           duration: stoppedElapsed,
           activityScore: stoppedActivityScore ?? 0,
-          windowLog: windowLog.length > 0 ? windowLog : undefined,
+          windowLog: trimmedLog.length > 0 ? trimmedLog : undefined,
           idlePeriods: stoppedIdlePeriods.length > 0 ? stoppedIdlePeriods : undefined,
           suspiciousPeriods: stoppedSuspiciousPeriods.length > 0 ? stoppedSuspiciousPeriods : undefined,
         });
@@ -832,7 +882,7 @@ export function TrackerScreen({ config, onRefresh }: Props) {
             )}
             {/* Stop */}
             <button
-              onClick={stopTimer}
+              onClick={() => stopTimer().catch(err => console.error("[stop-btn]", err))}
               disabled={loading}
               style={{ ...styles.stopBtn, opacity: loading ? 0.6 : 1 }}
             >

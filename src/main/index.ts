@@ -257,6 +257,23 @@ function createWindow() {
     mainWindow!.show();
   });
 
+  // Auto-recover if the renderer process crashes (blank screen)
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[main] renderer crashed:", details.reason, details.exitCode);
+    // Reset tracking state so a reload starts clean
+    isTracking = false;
+    currentEntryId = null;
+    stopWindowLogger();
+    stopHeartbeat();
+    stopScreenshotter();
+    stopIdleMonitor();
+    stopMeetingDetector();
+    stopJigglerDetector();
+    updateTrayMenu();
+    // Reload the renderer after a brief delay
+    setTimeout(() => mainWindow?.webContents.reload(), 500);
+  });
+
   // Red X quits the app
   mainWindow.on("close", () => {
     isQuitting = true;
@@ -649,6 +666,27 @@ ipcMain.handle("install-update", () => {
 autoUpdater.on("update-downloaded", () => {
   // Notify renderer — banner appears so VA can choose when to restart
   mainWindow?.webContents.send("update-ready");
+});
+
+// ── Sleep / wake handling ──────────────────────────────────────────────────────
+// When the machine sleeps, wall-clock time keeps advancing but JS stops running.
+// Without this, Date.now()-startTime would include sleep hours as tracked time.
+let sleepStartMs: number | null = null;
+
+powerMonitor.on("suspend", () => {
+  sleepStartMs = Date.now();
+  if (isTracking) {
+    mainWindow?.webContents.send("sleep-pause", { at: sleepStartMs });
+  }
+});
+
+powerMonitor.on("resume", () => {
+  const now = Date.now();
+  const sleepMs = sleepStartMs !== null ? now - sleepStartMs : 0;
+  sleepStartMs = null;
+  if (isTracking) {
+    mainWindow?.webContents.send("sleep-resume", { sleepMs });
+  }
 });
 
 // ── App lifecycle ──────────────────────────────────────────────────────────────

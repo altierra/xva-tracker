@@ -62,6 +62,16 @@ export interface XvaApi {
   onAuthChanged: (cb: () => void) => () => void;
   onUpdateReady: (cb: () => void) => () => void;
   onSuspiciousActivity: (cb: () => void) => () => void;
+  onDayClosed: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => () => void;
+  onTrackerSuspended: (cb: (payload: { reason: "idle" | "jiggler" }) => void) => () => void;
+  onForceStop: (cb: () => void) => () => void;
+  reportOffense: (type: "idle" | "jiggler") => Promise<string>;
+  checkSuspension: () => Promise<{ suspended: boolean; reason?: string; dayClosedToday?: boolean; dayClosedReason?: string } | null>;
+  getAccessibilityGranted: () => Promise<boolean>;
+  getScreenRecordingGranted: () => Promise<boolean>;
+  openScreenRecordingSettings: () => Promise<void>;
+  onSleepPause: (cb: (payload: { at: number }) => void) => () => void;
+  onSleepResume: (cb: (payload: { sleepMs: number }) => void) => () => void;
 }
 
 declare global {

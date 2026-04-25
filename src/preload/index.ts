@@ -90,6 +90,14 @@ contextBridge.exposeInMainWorld("xvaApi", {
     ipcRenderer.on("force-stop-tracking", cb);
     return () => ipcRenderer.removeAllListeners("force-stop-tracking");
   },
+  onSleepPause: (cb: (payload: { at: number }) => void) => {
+    ipcRenderer.on("sleep-pause", (_e, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners("sleep-pause");
+  },
+  onSleepResume: (cb: (payload: { sleepMs: number }) => void) => {
+    ipcRenderer.on("sleep-resume", (_e, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners("sleep-resume");
+  },
 });
 
 // Type declaration for renderer
